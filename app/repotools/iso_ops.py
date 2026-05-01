@@ -55,7 +55,7 @@ def mkinitcpio(project):
             copy2("./data/mkinitcpio-live.conf", "etc")
         elif "mkinitramfs" in project.all_install_image_packages:
             prog = "mkinitramfs"
-            binary = "/sbin/mkinitramfs"
+            binary = "/sbin/mkinitramfs-live"
             config_path = "/etc/initramfs.conf"
             extra_args = ""
             copy2("./data/initramfs/lib", "")

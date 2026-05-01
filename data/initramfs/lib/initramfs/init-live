@@ -1,0 +1,654 @@
+#!/bin/sh
+# ============================================
+# ISO LOOPBACK SUPPORT - archiso style
+# ============================================
+
+# Önce ISO loopback için gerekli modülleri yükle
+modprobe loop 2>/dev/null
+modprobe squashfs 2>/dev/null
+modprobe overlay 2>/dev/null
+modprobe exfat 2>/dev/null
+modprobe ntfs 2>/dev/null
+modprobe vfat 2>/dev/null
+modprobe iso9660 2>/dev/null
+modprobe cdrom 2>/dev/null
+modprobe -a sr_mod isofs usb-storage overlay cdrom dm-mod iso9660 udf vfat loop
+
+
+# ISO'yu bul ve loop olarak bağla
+find_iso_and_mount() {
+    echo "Looking for ISO file..."
+
+    # Tüm blok cihazlarını tara
+    for dev in /dev/sr[0-9] /dev/sd[a-z][0-9] /dev/sd[a-z] /dev/vd[a-z][0-9]; do
+        [ -b "$dev" ] || continue
+
+        echo "Checking: $dev"
+        mkdir -p /mnt/check 2>/dev/null
+
+        # Farklı dosya sistemlerini dene
+        for fstype in exfat ntfs vfat auto; do
+            mount -t $fstype "$dev" /mnt/check 2>/dev/null
+            if [ $? -eq 0 ]; then
+                # ISO ara
+                for iso in /mnt/check/*.iso; do
+                    if [ -f "$iso" ]; then
+                        echo "FOUND ISO: $iso"
+
+                        # ISO'yu loop olarak bağla
+                        mkdir -p /run/archiso/iso 2>/dev/null
+                        losetup /dev/loop0 "$iso" 2>/dev/null
+                        mount -t iso9660 /dev/loop0 /run/archiso/iso 2>/dev/null
+
+                        if [ $? -eq 0 ]; then
+                            echo "ISO mounted successfully"
+                            umount /mnt/check 2>/dev/null
+                            rmdir /mnt/check 2>/dev/null
+                            return 0
+                        fi
+                    fi
+                done
+                umount /mnt/check 2>/dev/null
+            fi
+        done
+        rmdir /mnt/check 2>/dev/null
+    done
+    return 1
+}
+
+# ISO'yu bul ve bağla
+if find_iso_and_mount; then
+    echo "ISO mounted, setting up overlay root..."
+
+    # Yeni root için dizinleri hazırla
+    mkdir -p /newroot 2>/dev/null
+
+    # CDROM içeriğini kontrol et
+    if [ -d "/run/archiso/iso/pisi" ]; then
+        SQUASHFS_PATH="/run/archiso/iso/pisi/pisi.sqfs"
+    elif [ -f "/run/archiso/iso/pisi.sqfs" ]; then
+        SQUASHFS_PATH="/run/archiso/iso/pisi.sqfs"
+    else
+        SQUASHFS_PATH=$(find /run/archiso/iso -name "*.sqfs" -type f | head -1)
+    fi
+
+    if [ -n "$SQUASHFS_PATH" ] && [ -f "$SQUASHFS_PATH" ]; then
+        echo "Found squashfs: $SQUASHFS_PATH"
+
+        # Squashfs'i bağla
+        mkdir -p /run/archiso/rootfs 2>/dev/null
+        mount -t squashfs -o loop,ro "$SQUASHFS_PATH" /run/archiso/rootfs
+
+        # Overlay için hazırlık
+        mkdir -p /run/archiso/cowspace 2>/dev/null
+        mount -t tmpfs -o mode=0755 tmpfs /run/archiso/cowspace
+
+        mkdir -p /run/archiso/cowspace/upper /run/archiso/cowspace/work
+
+        # Overlay mount et
+        mount -t overlay overlay -o lowerdir=/run/archiso/rootfs,upperdir=/run/archiso/cowspace/upper,workdir=/run/archiso/cowspace/work /newroot
+
+        if [ $? -eq 0 ]; then
+            echo "Overlay mounted successfully"
+
+            # Özel cihaz dosyalarını oluştur
+            mkdir -p /newroot/dev 2>/dev/null
+            mount --move /dev /newroot/dev 2>/dev/null
+            mkdir -p /newroot/proc 2>/dev/null
+            mount --move /proc /newroot/proc 2>/dev/null
+            mkdir -p /newroot/sys 2>/dev/null
+            mount --move /sys /newroot/sys 2>/dev/null
+
+            # switch_root ile geç
+            exec switch_root /newroot /sbin/init
+        fi
+    fi
+fi
+
+# ISO bulunamadıysa normal init devam et
+echo "No ISO found, continuing with normal boot..."
+
+# ============================================
+# BURADAN SONRA ORİJİNAL PİSİ LİNUX INIT KODU GELECEK
+# ============================================
+
+
+# Pisi Linux initramfs with ISO loopback support (Ventoy + mkinitcpio style)
+#
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+INITRAMFSCONF="/etc/initramfs.conf"
+
+ROOT_LINKS="bin sbin lib boot usr opt"
+ROOT_TREES="etc root home var run"
+TMPFS_DIRS="dev mnt mnt/cdrom mnt/livecd mnt/thin tmp sys proc media"
+LOOPBACKFILE="/pisi/pisi.sqfs"
+LOOPBACKEXTRA="/pisi/pisi_extra.sqfs"
+
+NORESUME=0
+LIVE=0
+NFSROOT=0
+QUIET=0
+RAID_INCREMENTAL=1
+RAID=0
+LVM=0
+COPYTORAM=0
+SPLASH=0
+WIPEMEM=0
+
+# ISO loopback değişkenleri
+IMG_DEV=""
+IMG_LOOP=""
+ISO_MOUNTED=0
+
+HOTPLUG="/sbin/hotplug"
+MNTDIR=""
+FS_TYPE=""
+INITRAMFS=""
+ROOT_FLAGS=""
+ROOT_DEVICE=""
+ROOT_TARGET=""
+RESUME_DEVICE=""
+WIPEMEM_OPTS="-llv"
+
+###########################
+# Miscellaneous functions #
+###########################
+
+info() {
+    echo "<6>initramfs: $1" > /dev/kmsg
+}
+
+fall2sh() {
+    test -x /bin/plymouth && /bin/plymouth quit &> /dev/null
+    kill -9 $(pidof plymouthd) &> /dev/null
+    echo "--> $*"
+    echo "Reboot with initramfs=shell(noprobe) to further debug the issue."
+    /bin/sh -l
+}
+
+##################
+# Device probers #
+##################
+
+probe_devices() {
+    echo $HOTPLUG > /proc/sys/kernel/hotplug
+    if [ "x$1" = "x--with-kms" ]; then
+        probe_kms
+        test -x /bin/plymouth && /bin/plymouth show-splash
+    fi
+    probe_pci_devices
+    probe_virtio_devices
+    probe_usb_devices
+    echo > /proc/sys/kernel/hotplug
+    [ "${RAID}" -eq "1" ] && probe_raid
+    [ "${LVM}" -eq "1" ] && probe_lvm
+}
+
+probe_kms() {
+    for device in /sys/bus/pci/devices/*/boot_vga; do
+        [ -f $device ] || continue
+        info "Loading KMS driver"
+        grep -q 1 $device && modprobe -bq `cat ${device%boot_vga}modalias`
+    done
+    if [ ! -c /dev/fb0 ]; then
+        echo "options uvesafb scroll=ywrap mtrr=0 nocrtc=1 mode_option=1024x768-32" > /etc/modprobe.d/uvesafb.conf
+        modprobe -bq uvesafb
+    fi
+}
+
+probe_pci_devices() {
+    info "Probing PCI devices"
+    local MODULES=""
+    for module in /sys/bus/pci/devices/*/modalias; do
+        [ -f $module ] || continue
+        MODULES="$MODULES $(cat $module)"
+    done
+    modprobe -bqa $MODULES
+}
+
+probe_usb_devices() {
+    info "Probing USB devices"
+    local MODULES=""
+    for module in /sys/bus/usb/devices/*/modalias; do
+        [ -f $module ] || continue
+        MODULES="$MODULES $(cat $module)"
+    done
+    modprobe -bqa $MODULES
+}
+
+probe_virtio_devices() {
+    local MODULES=""
+    for module in /sys/bus/virtio/devices/*/modalias; do
+        [ -f $module ] || continue
+        MODULES="$MODULES $(cat $module)"
+    done
+    modprobe -bqa $MODULES
+}
+
+probe_raid() {
+    info "Probing RAID devices"
+    modprobe -bqa dm-mod raid0 raid1 raid10 raid456
+    if [ -x /sbin/mdadm ]; then
+        /sbin/mdadm --examine --scan > /etc/mdadm.conf
+        /sbin/mdadm -As
+    fi
+}
+
+probe_lvm() {
+    info "Probing LVM devices"
+    modprobe -qa dm-mod
+    if [ -x /sbin/lvm ]; then
+        /sbin/lvm vgscan --ignorelockingfailure &> /dev/null
+        /sbin/lvm vgchange -ay --sysinit --ignorelockingfailure &> /dev/null
+        /sbin/lvm vgmknodes --ignorelockingfailure &> /dev/null
+    fi
+}
+
+#################################
+# ISO Loopback Functions (YENI!)
+#################################
+
+mount_iso_loop() {
+    info "Looking for ISO file..."
+
+    # Gerekli modülleri yükle
+    modprobe loop
+    modprobe squashfs
+    modprobe overlay
+    modprobe exfat 2>/dev/null
+    modprobe ntfs 2>/dev/null
+    modprobe vfat
+
+    # Önce gerçek CD-ROM cihazlarını kontrol et (VBox/Real Hardware için)
+    for cdrom in /dev/sr[0-9]; do
+        if [ -b "$cdrom" ]; then
+            info "Checking CD-ROM: $cdrom"
+            mkdir -p /newroot/mnt/cdrom
+            mount -t iso9660 -o ro "$cdrom" /newroot/mnt/cdrom 2>/dev/null
+            if [ $? -eq 0 ]; then
+                # İçinde pisi.sqfs var mı kontrol et
+                if [ -f "/newroot/mnt/cdrom/${LOOPBACKFILE}" ]; then
+                    info "System found on direct CD-ROM: $cdrom"
+                    ISO_MOUNTED=1
+                    return 0
+                else
+                    umount /newroot/mnt/cdrom
+                fi
+            fi
+        fi
+    done
+
+    # Eğer img_dev ve img_loop parametreleri varsa önce onları dene
+    if [ -n "$IMG_DEV" ] && [ -n "$IMG_LOOP" ]; then
+        info "Trying img_dev=$IMG_DEV, img_loop=$IMG_LOOP"
+
+        for dev in $IMG_DEV; do
+            mkdir -p /mnt/iso_source
+            for fstype in exfat ntfs vfat auto; do
+                mount -t $fstype "$dev" /mnt/iso_source 2>/dev/null
+                if [ $? -eq 0 ]; then
+                    if [ -f "/mnt/iso_source/$IMG_LOOP" ]; then
+                      info "Found ISO on $dev"
+                      if losetup /dev/loop0 "/mnt/iso_source/$IMG_LOOP" 2>/dev/null; then
+                          mkdir -p /newroot/mnt/cdrom
+                          mount -t iso9660 /dev/loop0 /newroot/mnt/cdrom
+                          if [ $? -eq 0 ]; then
+                              info "ISO mounted successfully"
+                              ROOT_DEVICE="/dev/loop0"
+                              ISO_MOUNTED=1
+                              return 0
+                          fi
+                      fi
+                    fi
+                    umount /mnt/iso_source
+                fi
+            done
+            rmdir /mnt/iso_source 2>/dev/null
+        done
+    fi
+
+    # Ventoy style: Tüm bölümleri tara ve *.iso bul
+    for dev in /dev/sd[a-z][0-9] /dev/sd[a-z] /dev/vd[a-z][0-9] /dev/nvme[0-9]n[0-9]p[0-9]; do
+        [ -b "$dev" ] || continue
+        info "Checking device: $dev"
+
+        mkdir -p /mnt/ventoy
+        for fstype in exfat ntfs vfat auto; do
+            mount -t $fstype "$dev" /mnt/ventoy 2>/dev/null
+            if [ $? -eq 0 ]; then
+                for iso in /mnt/ventoy/*.iso; do
+                    if [ -f "$iso" ]; then
+                        info "Found ISO: $iso on $dev"
+                        if losetup /dev/loop0 "$iso" 2>/dev/null; then
+                            mkdir -p /newroot/mnt/cdrom
+                            mount -t iso9660 /dev/loop0 /newroot/mnt/cdrom
+                            if [ $? -eq 0 ]; then
+                                info "ISO mounted successfully"
+                                ROOT_DEVICE="/dev/loop0"
+                                ISO_MOUNTED=1
+                                umount /mnt/ventoy
+                                rmdir /mnt/ventoy
+                                return 0
+                            fi
+                        fi
+                    fi
+                done
+                umount /mnt/ventoy
+            fi
+        done
+        rmdir /mnt/ventoy 2>/dev/null
+    done
+
+    info "No ISO file found"
+    return 1
+}
+
+#################################
+# Filesystem specific functions #
+#################################
+
+manage_tmpfs() {
+    mount -t tmpfs tmpfs /newroot
+    for d in ${TMPFS_DIRS}; do
+        mkdir -p "/newroot/${d}"
+    done
+}
+
+mount_rootfs() {
+    FS_TYPE=`disktype $ROOT_DEVICE | grep KERNELMODULE | awk '{print $2}'`
+    info "Mounting rootfs: $ROOT_DEVICE ($FS_TYPE)"
+    mount -r -t $FS_TYPE -n ${ROOT_FLAGS} ${ROOT_DEVICE} /newroot
+}
+
+mount_loop_root() {
+    FS_LOCATION="mnt/livecd"
+    cd /newroot
+
+    info "Setting up overlay root from ISO"
+
+    # Squashfs modülünü yükle
+    modprobe -q squashfs
+    modprobe overlay
+
+    # Overlay için dizinler
+    OVERLAY_DIR="/newroot/tmp"
+    mkdir -p ${OVERLAY_DIR}/upper ${OVERLAY_DIR}/loop ${OVERLAY_DIR}/work
+
+    # Squashfs'i bağla
+    if [ -f "/newroot/mnt/cdrom/${LOOPBACKFILE}" ]; then
+        mount -t squashfs -o loop,ro /newroot/mnt/cdrom/${LOOPBACKFILE} ${OVERLAY_DIR}/loop
+    else
+        info "Could not find ${LOOPBACKFILE}"
+        fall2sh "Squashfs file not found"
+    fi
+
+    # Overlay mount et
+    mount -t overlay overlay -o lowerdir=${OVERLAY_DIR}/loop,upperdir=${OVERLAY_DIR}/upper,workdir=${OVERLAY_DIR}/work /newroot/mnt/livecd
+
+    if [ "$?" != "0" ]; then
+        fall2sh "Could not mount overlay root"
+    fi
+
+    # Gerekli bağlantıları oluştur
+    for x in ${ROOT_LINKS}; do
+        ln -sf "${FS_LOCATION}/${x}" "${x}"
+    done
+
+    if [ -e "${FS_LOCATION}/lib32" ]; then
+        ln -sf "${FS_LOCATION}/lib32" "lib32"
+    fi
+    ln -sf "${FS_LOCATION}/lib" "lib64"
+
+    chmod 1777 tmp
+    (cd /newroot/${FS_LOCATION}; cp -a ${ROOT_TREES} /newroot)
+}
+
+mount_cdroot() {
+    FS_LOCATION="mnt/livecd"
+    cd /newroot
+
+    modprobe -q squashfs
+    modprobe -a sr_mod isofs usb-storage overlay cdrom
+
+    OVERLAY_DIR="/newroot/tmp"
+    mkdir -p ${OVERLAY_DIR}/upper ${OVERLAY_DIR}/loop ${OVERLAY_DIR}/work
+    loverdir=${OVERLAY_DIR}/loop
+
+    if [ -f "/newroot/mnt/cdrom/${LOOPBACKEXTRA}" ]; then
+        loverdir=${OVERLAY_DIR}/loopextra:${loverdir}
+        mkdir -p ${OVERLAY_DIR}/loopextra
+        mount -t squashfs -o loop,ro /newroot/mnt/cdrom/${LOOPBACKEXTRA} ${OVERLAY_DIR}/loopextra
+    fi
+
+    mount -t squashfs -o loop,ro /newroot/mnt/cdrom/${LOOPBACKFILE} ${OVERLAY_DIR}/loop
+    mount -t overlay overlay -o lowerdir=${loverdir},upperdir=${OVERLAY_DIR}/upper,workdir=${OVERLAY_DIR}/work /newroot/mnt/livecd
+
+    if [ "$?" != "0" ]; then
+        fall2sh "Could not mount root image"
+    fi
+
+    for x in ${ROOT_LINKS}; do
+        ln -sf "${FS_LOCATION}/${x}" "${x}"
+    done
+
+    if [ -e "${FS_LOCATION}/lib32" ]; then
+        ln -sf "${FS_LOCATION}/lib32" "lib32"
+    fi
+    ln -sf "${FS_LOCATION}/lib" "lib64"
+
+    chmod 1777 tmp
+    (cd /newroot/${FS_LOCATION}; cp -a ${ROOT_TREES} /newroot)
+
+    MNTDIR=`grep \/mnt\/cdrom\ /proc/mounts|sed 's/\/newroot//g'`
+    echo "$MNTDIR" >> /newroot/etc/fstab
+}
+
+##############################
+# Config and cmdline parsers #
+##############################
+
+parse_config() {
+    while read inputline; do
+        case "${inputline}" in
+            raid=*) RAID=$(echo $inputline|cut -f2- -d=) ;;
+            lvm=*) LVM=$(echo $inputline|cut -f2- -d=) ;;
+            thin=*) NFSROOT=$(echo $inputline|cut -f2- -d=) ;;
+            root=*) ROOT_TARGET=$(echo $inputline|cut -f2- -d=) ;;
+            rootflags=*) ROOT_FLAGS=$(echo $inputline|cut -f2- -d=) ;;
+            liveroot=*) LIVE=1; RAID_INCREMENTAL=0; LIVEROOT=$(echo $inputline|cut -f2- -d=) ;;
+            resume=*) RESUME_DEVICE="${inputline#resume=}" ;;
+            noresume) NORESUME=1 ;;
+            copytoram) COPYTORAM=1 ;;
+            wipemem) WIPEMEM=1 ;;
+            wipememopts=*) WIPEMEM=1; WIPEMEM_OPTS=$(echo $inputline|cut -f2- -d=) ;;
+            splash) SPLASH=1 ;;
+            init=*) INIT="${inputline#INIT=}" ;;
+        esac
+    done < $INITRAMFSCONF
+}
+
+parse_cmdline() {
+    for x in `cat /proc/cmdline`; do
+        case "${x}" in
+            [0123456Ss]) LEVEL=`echo ${x}|tr A-Z a-z` ;;
+            mudur=*)
+                for m in `echo ${x}|cut -f2 -d=|sed 's/,/ /g'`; do
+                    case "${m}" in
+                        livecd|livedisk) LIVE=1 ;;
+                        raid) RAID=1 ;;
+                        lvm) LVM=1 ;;
+                        thin) NFSROOT=1 ;;
+                    esac
+                done
+            ;;
+            initramfs=*) INITRAMFS=`echo ${x}|cut -f2- -d=` ;;
+            root=*) ROOT_TARGET=`echo ${x}|cut -f2- -d=` ;;
+            rootflags=*) ROOT_FLAGS="-o ${x#rootflags=}" ;;
+            liveroot=*) LIVE=1; LIVEROOT=$(echo ${x}|cut -f2- -d=) ;;
+            resume=*) RESUME_DEVICE="${x#resume=}" ;;
+            noresume) NORESUME=1 ;;
+            init=*) INIT="${x#init=}" ;;
+            copytoram) COPYTORAM=1 ;;
+            wipemem) WIPEMEM=1 ;;
+            wipememopts=*) WIPEMEM=1; WIPEMEM_OPTS=$(echo $x|cut -f2- -d=) ;;
+            splash) SPLASH=1 ;;
+            single) LEVEL="s" ;;
+            quiet) QUIET=1 ;;
+            img_dev=*) IMG_DEV="${x#img_dev=}" ;;
+            img_loop=*) IMG_LOOP="${x#img_loop=}" ;;
+            archisobasedir=*) ARCHISO_BASEDIR="${x#archisobasedir=}" ;;
+            findiso=*) IMG_LOOP="${x#findiso=}"; LIVE=1 ;;
+            iso-scan/filename=*) IMG_LOOP="${x#iso-scan/filename=}"; LIVE=1 ;;
+            blacklist=*)
+                modules=${x#blacklist=}
+                for module in ${modules//,/ }; do
+                    echo "blacklist $module" >> /etc/modprobe.d/cmdline.conf
+                done
+            ;;
+        esac
+    done
+    if [ -f /etc/modprobe.d/cmdline.conf ]; then
+        cp /etc/modprobe.d/cmdline.conf /dev/.modprobe.initramfs.conf
+    fi
+}
+
+####################
+# init starts here #
+####################
+
+info "Starting init on initramfs"
+
+mount -n -t proc proc /proc
+mount -n -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -m 0755 /dev/pts
+mount -t devpts -o gid=5,mode=620 devpts /dev/pts
+
+modprobe -a sr_mod isofs usb-storage overlay cdrom
+
+if [ -f "$INITRAMFSCONF" ]; then
+    parse_config
+fi
+
+parse_cmdline
+
+test "x$QUIET" = "x1" && echo "1" > /proc/sys/kernel/printk
+
+if [ "$LEVEL" != "s" -a "$SPLASH" = "1" -a -x /sbin/plymouthd ]; then
+    /sbin/plymouthd --attach-to-session
+fi
+
+if [ "${INITRAMFS}" = "shellnoprobe" ]; then
+    fall2sh "Starting up a shell without probing"
+elif [ "${INITRAMFS}" = "shell" ]; then
+    probe_devices --with-kms
+    fall2sh "Starting up a shell"
+fi
+
+if [ "${WIPEMEM}" = "1" ]; then
+    info "Wiping out memory..."
+    sdmem ${WIPEMEM_OPTS}
+    poweroff -f
+fi
+
+probe_devices --with-kms
+
+if [ -x /usr/sbin/resume -a -b "$RESUME_DEVICE" -a "x$NORESUME" != "x1" ]; then
+    [ "x$SPLASH" = "x1" ] && SPLASHPARAM="-P splash=y" || SPLASHPARAM="-P splash=n"
+    info "Attempting to resume..."
+    /usr/sbin/resume $SPLASHPARAM $RESUME_DEVICE
+fi
+
+echo 0x0100 > /proc/sys/kernel/real-root-dev
+
+if [ "${LIVE}" -eq "1" ]; then
+    ROOT_DEVICE=""
+    manage_tmpfs
+
+    modprobe -qa nls_cp857 nls_utf8 vfat
+
+    # ISO LOOPBACK DESTEĞİ
+    mount_iso_loop
+
+    if [ ${ISO_MOUNTED} -eq 1 ]; then
+        info "Booting from ISO loopback"
+        mount_loop_root
+    else
+        # Normal fiziksel medya ara
+        for i in `seq 50`; do
+            t=`findfs ${LIVEROOT} 2>/dev/null`
+
+            # Standart medya ara
+            modprobe -bqa usb-storage udf
+            modprobe -a sr_mod isofs usb-storage overlay cdrom
+
+            if [ "$#" -gt "0" ]; then
+                for x in $t; do
+                    mount -r ${x} /newroot/mnt/cdrom > /dev/null 2>&1
+                    if [ "$?" = "0" ]; then
+                        if [ -e /newroot/mnt/cdrom/${LOOPBACKFILE} ]; then
+                            ROOT_DEVICE="/newroot${x}"
+                            break
+                        else
+                            umount /newroot/mnt/cdrom
+                        fi
+                    fi
+                done
+            fi
+
+            if [ "${ROOT_DEVICE}" != "" ]; then
+                break
+            else
+                probe_devices
+                usleep 200000
+            fi
+        done
+
+        if [ "${ROOT_DEVICE}" = "" ]; then
+            fall2sh "Could not find mount media"
+        fi
+
+        mount_cdroot
+    fi
+
+elif [ "${NFSROOT}" -eq "1" ]; then
+    run_dhcpc
+    manage_tmpfs
+    mount_nfs
+    hostname $HOSTNAME
+
+else
+    for i in `seq 50`; do
+        ROOT_DEVICE=`findfs ${ROOT_TARGET} 2>/dev/null`
+        if [ ! -b "${ROOT_DEVICE}" ]; then
+            probe_devices
+            usleep 200000
+        else
+            break
+        fi
+    done
+    if [ ! -b "${ROOT_DEVICE}" ]; then
+        fall2sh "Could not find boot device"
+    else
+        mount_rootfs
+    fi
+fi
+
+[ "${INIT}" = "" ] && INIT="/sbin/init"
+[ "${RAID_INCREMENTAL}" -eq "0" ] && touch /dev/.in_sysinit
+
+mount --move /dev /newroot/dev
+mount --move /proc /newroot/proc
+mount --move /sys /newroot/sys
+
+if [ "${LIVE}" -eq "1" ]; then
+    FS_LOCATION="mnt/livecd"
+    for x in lock pisilinux shm; do
+        cp -a "/newroot/${FS_LOCATION}/dev/${x}" "/newroot/dev/${x}" 2>/dev/null
+    done
+fi
+
+info "Switching to the real root"
+test -x /bin/plymouth && /bin/plymouth update-root-fs --new-root-dir=/newroot
+exec /bin/switch_root -c /dev/console /newroot ${INIT} ${LEVEL}
