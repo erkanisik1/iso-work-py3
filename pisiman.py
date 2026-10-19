@@ -74,6 +74,30 @@ def acquire_build_lock(work_dir):
     return fh
 
 
+def format_duration(seconds):
+    """Saniyeyi okunabilir sure bicimine cevirir.
+
+    Hem saat formatini (SS:DD:SS) hem de insan okunur metni dondurur:
+
+        558.95 -> '00:09:18 (9 minutes, 18 seconds)'
+        3725   -> '01:02:05 (1 hour, 2 minutes, 5 seconds)'
+    """
+    total = int(round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    clock = "%02d:%02d:%02d" % (hours, minutes, secs)
+
+    parts = []
+    if hours:
+        parts.append("%d hour%s" % (hours, "" if hours == 1 else "s"))
+    if minutes:
+        parts.append("%d minute%s" % (minutes, "" if minutes == 1 else "s"))
+    # Saniyeyi her zaman goster (kisa islerde "0 seconds" de anlamlidir).
+    parts.append("%d second%s" % (secs, "" if secs == 1 else "s"))
+
+    return "%s (%s)" % (clock, ", ".join(parts))
+
+
 def maker(op, project_file):
     from app.repotools import maker, project
 
@@ -153,7 +177,7 @@ def maker(op, project_file):
         maker.make_iso(project)
 
     end = time.time()
-    print("Total time is %s seconds." % (end - start))
+    print("Total time is %s." % format_duration(end - start))
 
 
 def usage(app):
