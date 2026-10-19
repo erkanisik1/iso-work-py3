@@ -1,0 +1,18 @@
+<!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
+  "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
+
+<Menu>
+  <Name>Applications</Name>
+
+
+
+  <!-- PisiTools ana kategorisi -->
+  <Menu>
+    <Name>PisiTools</Name>
+    <Directory>kf5-pisiTools.directory</Directory>
+    <Include>
+      <Category>PisiTools</Category>
+    </Include>
+  </Menu>
+
+</Menu>

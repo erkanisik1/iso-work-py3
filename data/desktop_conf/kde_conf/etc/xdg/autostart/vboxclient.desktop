@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=VBoxClient Autostart
+Comment=VirtualBox Guest Additions servislerini otomatik başlatır
+Exec=VBoxClient-all
+Terminal=false
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+StartupNotify=false

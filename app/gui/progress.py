@@ -22,6 +22,8 @@ class Progress:
         self.application = None
 
     def started(self, title):
+        # Eski diyalog açık kaldıysa önce kapat (üst üste binmesin)
+        self.finished()
         self.dialog = QProgressDialog(title, "Stop", 0, 0, self.parent)
         self.dialog.setGeometry(
             self.parent.x() + (self.parent.width() // 2 - 150),
@@ -32,6 +34,8 @@ class Progress:
         QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents)
 
     def progress(self, msg, percent):
+        if not self.dialog:
+            return
         self.dialog.setLabelText(msg)
         # otherwise KProgressDialog automatically closes itself, sigh
         if percent < 100:
@@ -39,7 +43,14 @@ class Progress:
         QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents)
 
     def finished(self):
-        if self.dialog:
-            self.dialog.done(0)
-            self.dialog.close()  # for progress dialog auto close
+        try:
+            if self.dialog:
+                dlg, self.dialog = self.dialog, None
+                dlg.hide()
+                dlg.done(0)
+                dlg.close()
+                dlg.deleteLater()
+                QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents)
+        except Exception:
+            pass
         self.dialog = None

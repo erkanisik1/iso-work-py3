@@ -59,10 +59,11 @@ _mnt_bind() {
     /bin/mount -o bind "${src}" "${mnt}"
 }
 
-# args: /path/to/image_file, mountpoint
+# args: /path/to/image_file, mountpoint, newroot
 _mnt_squashfs() {
     local img="${1}"
     local mnt="${2}"
+    local newroot="${3}"
     local img_fullname="${img##*/}";
     local img_name="${img_fullname%.*}"
     local tmp_mnt="/ro_branch/${img_name}"
@@ -98,6 +99,18 @@ _mnt_squashfs() {
 
 run_hook() {
     modprobe loop
+
+    # Kernel cmdline'dan iso_filename oku
+    local _raw=""
+    _raw=$(cat /proc/cmdline | tr ' ' '\n' | grep "^iso_filename=" | head -1)
+    if [ -n "${_raw}" ]; then
+        iso_filename="${_raw#*=}"
+    fi
+
+    if [ "${pisi_live_loop_mounted}" = "1" ]; then
+        echo "::: ISO zaten bagli durumda (Ventoy). Disk tarama atlaniyor. :::"
+    fi
+    
     if [ "x${arch}" = "x" ]; then
         arch="$(uname -m)"
     fi
@@ -126,7 +139,11 @@ run_hook() {
 
 testdevice() {
     fstype=$( blkid -s TYPE -o value ${MDEV} )
-    mount -r -t ${fstype} -o noatime "${MDEV}" "/bootmnt" >/dev/null 2>/dev/null
+    if [ -n "${fstype}" ]; then
+        mount -r -t "${fstype}" -o noatime "${MDEV}" "/bootmnt" >/dev/null 2>/dev/null
+    else
+        mount -r -o noatime "${MDEV}" "/bootmnt" >/dev/null 2>/dev/null
+    fi
     if [ $? -eq 0 ]; then
         if [ -f "/bootmnt/.miso" ]; then
             msg "::: INFO: miso system at ${MDEV}"
@@ -144,6 +161,17 @@ testdevice() {
 
 probedevice() {
 # Loop device test every second up to some limit
+    # Debug: partition mount noktasina yaz (RW remount dene)
+    _debug_probe() {
+        for _pd in /ventoy_mnt /run/live_scan_mnt; do
+            if mountpoint -q "${_pd}" 2>/dev/null; then
+                mount -o remount,rw "${_pd}" 2>/dev/null
+                echo "[probedevice] $1" >> "${_pd}/.live_debug" 2>/dev/null
+                mount -o remount,ro "${_pd}" 2>/dev/null
+            fi
+        done
+    }
+
     if [ "x${usbdelay}" != "x" ]; then
         waittime=${usbdelay}
     else
@@ -175,17 +203,130 @@ probedevice() {
         # still nothing found, we will look for boot device
         if [ -z "${found}" ]; then
             [ ${waitcount} -eq 0 ] && msg ":: Looking for boot device"
-            if [ "x${nocd}" = "x" ]; then
-                # Look for CD
-                cdroms=$( /bin/cat /proc/sys/dev/cdrom/info | { while read a b c; do
-                        if [ "${a}" = "drive" -a "${b}" = "name:" ]; then
-                            echo "${c}"
+
+            # ISO ara: Partition'lari tara, icindeki ISO'lari loop mount et
+            # Oncelik: filename eslesmesi -> fallback (ilk ISO)
+            for d in /dev/sd[a-z][0-9]* /dev/nvme[0-9]*n[0-9]p[0-9]* /dev/mmc[0-9]*p[0-9]*; do
+                [ -b "${d}" ] || continue
+
+                VFSTYPE=$(blkid -s TYPE -o value "${d}" 2>/dev/null)
+                [ -z "${VFSTYPE}" ] && continue
+                [ "${VFSTYPE}" = "swap" ] && continue
+                [ "${VFSTYPE}" = "LVM2_member" ] && continue
+
+                msg "::: Scanning ${d} (${VFSTYPE}) for ISO files..."
+
+                mkdir -p /ventoy_mnt
+                mount -r -t "${VFSTYPE}" -o noatime "${d}" /ventoy_mnt >/dev/null 2>/dev/null
+                if [ $? -eq 0 ]; then
+                    _iso_list="/tmp/miso_iso_list.txt"
+                    rm -f "${_iso_list}" 2>/dev/null
+
+                    if command -v find >/dev/null 2>&1; then
+                        find /ventoy_mnt -type f \( -iname "*.iso" -o -iname "*.iso9660" \) 2>/dev/null > "${_iso_list}"
+                    fi
+
+                    if [ ! -s "${_iso_list}" ]; then
+                        for iso_path in /ventoy_mnt/*.iso /ventoy_mnt/*.ISO \
+                                        /ventoy_mnt/ISO/*.iso /ventoy_mnt/ISO/*.ISO \
+                                        /ventoy_mnt/isos/*.iso; do
+                            [ -f "${iso_path}" ] && echo "${iso_path}" >> "${_iso_list}"
+                        done
+                    fi
+
+                    local _fallback_iso=""
+                    local _fallback_loop=""
+                    if [ -s "${_iso_list}" ]; then
+                         while read iso_path; do
+                             [ -z "${iso_path}" ] && continue
+                             msg "::: Found ISO: ${iso_path}"
+
+                            losetup -f "${iso_path}" >/dev/null 2>/dev/null
+                            if [ $? -eq 0 ]; then
+                                LOOP_DEV=$(losetup -j "${iso_path}" 2>/dev/null | cut -d: -f1)
+                                if [ -n "${LOOP_DEV}" ]; then
+                                    local _accept=0
+                                    # DOSYA ADI ILE ESLESTIRME
+                                    if [ ${_accept} -eq 0 ] && [ -n "${iso_filename}" ]; then
+                                        local _basename=""
+                                        _basename=$(basename "${iso_path}" 2>/dev/null)
+                                        if [ "${iso_filename}" = "${_basename}" ]; then
+                                            _accept=1
+                                            msg "::: ISO filename matched: ${iso_filename}"
+                                        else
+                                            msg "::: ISO filename mismatch (expected: ${iso_filename}, found: ${_basename})"
+                                        fi
+                                    fi
+
+                                    mount -r -t iso9660 -o noatime "${LOOP_DEV}" "/bootmnt" >/dev/null 2>/dev/null
+                                    if [ $? -eq 0 ]; then
+                                        if [ -f "/bootmnt/.miso" ]; then
+                                             if [ ${_accept} -eq 1 ]; then
+                                                  msg "::: INFO: miso system found at ${iso_path}"
+                                                  MDEV=${LOOP_DEV}
+                                                  found="yes"
+                                                  rm -f "${_iso_list}" 2>/dev/null
+                                                  break
+                                             fi
+                                             if [ -z "${_fallback_iso}" ]; then
+                                                 _fallback_iso="${iso_path}"
+                                                 _fallback_loop="${LOOP_DEV}"
+                                             fi
+                                         fi
+                                         /bin/umount "/bootmnt/" 2>/dev/null
+                                     fi
+                                 fi
+                             fi
+                         done < "${_iso_list}"
+                     fi
+                     rm -f "${_iso_list}" 2>/dev/null
+
+                     if [ -z "${found}" ] && [ -n "${_fallback_iso}" ]; then
+                         msg "::: Trying fallback ISO: ${_fallback_iso}"
+                         if mount -r -t iso9660 -o noatime "${_fallback_loop}" "/bootmnt" >/dev/null 2>/dev/null; then
+                             if [ -f "/bootmnt/.miso" ]; then
+                                 msg "::: Fallback ISO accepted: ${_fallback_iso}"
+                                 MDEV=${_fallback_loop}
+                                 found="yes"
+                             else
+                                 /bin/umount "/bootmnt/" 2>/dev/null
+                             fi
+                         fi
+                     fi
+
+                     /bin/umount "/ventoy_mnt" 2>/dev/null
+                     rmdir /ventoy_mnt 2>/dev/null
+
+                     if [ "${found}" = "yes" ]; then
+                         break
+                     fi
+                fi
+            done
+
+            if [ -z "${found}" ]; then
+                if [ "x${nocd}" = "x" ]; then
+                    # Look for CD
+                    cdroms=$( /bin/cat /proc/sys/dev/cdrom/info | { while read a b c; do
+                            if [ "${a}" = "drive" -a "${b}" = "name:" ]; then
+                                echo "${c}"
+                                break
+                            fi
+                        done
+                    } )
+                    for i in ${cdroms}; do
+                        MDEV=/dev/${i}
+                        testdevice
+                        if [ "x${MDEV}" != "x" ]; then
                             break
                         fi
                     done
-                } )
-                for i in ${cdroms}; do
-                    MDEV=/dev/${i}
+                fi
+            fi
+
+            # Test partitions and whole disks (normal boot)
+            if [ -z "${found}" ]; then
+                for d in /dev/sd[a-z] /dev/sd[a-z][0-9]*; do
+                    MDEV=${d}
                     testdevice
                     if [ "x${MDEV}" != "x" ]; then
                         break
@@ -193,13 +334,16 @@ probedevice() {
                 done
             fi
 
-            # Test partitions
-            if [ "x${MDEV}" = "x" ]; then
-                for d in /dev/sd[a-z][0-9]*; do
-                    MDEV=${d}
-                    testdevice
-                    if [ "x${MDEV}" != "x" ]; then
-                        break
+            # NVMe diskleri de tara (partisyonlu ve partisyonsuz)
+            if [ -z "${found}" ]; then
+                for d in /dev/nvme[0-9]*n[0-9] /dev/nvme[0-9]*n[0-9]p[0-9]*; do
+                    if [ -e "${d}" ]; then
+                        msg "::: Trying NVMe: ${d}"
+                        MDEV=${d}
+                        testdevice
+                        if [ "x${MDEV}" != "x" ]; then
+                            break
+                        fi
                     fi
                 done
             fi
@@ -213,14 +357,19 @@ probedevice() {
     done
 }
 
-# Bu fonksiyonda hata var
 miso_mount_handler() {
     msg "::: miso_mount_handler basladi."
     local newroot="${1}"
     local found
 
-    # Probe all devices
-    probedevice
+    # Eğer ISO zaten bağlıysa (örneğin Ventoy veya loopback ile live_loop_mnt kancası bağladıysa)
+    if [ -f "/bootmnt/.miso" ]; then
+        msg "::: ISO zaten bagli durumda (.miso algilandi). Disk tarama atlaniyor. :::"
+        found="yes"
+    else
+        # Probe all devices
+        probedevice
+    fi
 
     if [ -z "${found}" ]; then
         echo ">> ERROR: unable to find boot device"
@@ -231,41 +380,115 @@ miso_mount_handler() {
 
     if [ "${copytoram}" = "y" ]; then
         msg -n ":: Mounting /copytoram (tmpfs) filesystem, size=${copytoram_size}..."
+        mkdir -p /copytoram
         mount -t tmpfs -o "size=${copytoram_size}",mode=0755 copytoram /copytoram
         msg "done."
     fi
 
     msg -n ":: Mounting rw_branch (tmpfs) filesystem, size=${rw_branch_size}..."
+    mkdir -p /rw_branch
     mount -t tmpfs -o "size=${rw_branch_size}",mode=0755 rw_branch /rw_branch
     msg "done."
 
-    msg ":: Mounting root (aufs) filesystem"
-    /bin/mount -t aufs -o dirs=/rw_branch=rw union "${newroot}"
-    if [ $? -ne 0 ]; then
-        echo ">> ERROR: while mounting root (aufs) filesystem."
+    # OverlayFS için writable upper ve work dizinlerini oluştur
+    mkdir -p /rw_branch/upper /rw_branch/work
+
+    local lower_dirs=""
+    local squashfs_mounted="no"
+    local non_root_squashfs=""
+
+    # 1. Aşama: squashfs imajlarını mount et ve root lower_dirs listesini oluştur
+    msg ":: Mounting squashfs images"
+    while read img imgarch mountpoint type kernelarg; do
+        # Yorum satırlarını atla
+        [ "${img#"#"}" != "${img}" ] && continue
+        [ "$imgarch" != "$arch" ] && continue
+        [ ! -r "/bootmnt/${misobasedir}/${img}" ] && continue
+
+        # Çekirdek parametresi kontrolü
+        if [ -n "${kernelarg}" ]; then
+            overlay_arg_available "$kernelarg"
+            if [ $? == 1 ]; then
+                continue
+            fi
+        fi
+
+        if [ "${type}" = "squashfs" ]; then
+            local img_fullname="${img##*/}"
+            local img_name="${img_fullname%.*}"
+            local tmp_mnt="/ro_branch/${img_name}"
+
+            if [ "${copytoram}" = "y" ]; then
+                msg -n ":: Copying squashfs image ${img} to RAM..."
+                /bin/cp "/bootmnt/${misobasedir}/${img}" "/copytoram/${img_fullname}"
+                if [ $? -ne 0 ]; then
+                    echo ">> ERROR: while copy ${img} to /copytoram/${img_fullname}"
+                    launch_interactive_shell
+                fi
+                img_path="/copytoram/${img_fullname}"
+                msg "done."
+            else
+                img_path="/bootmnt/${misobasedir}/${img}"
+            fi
+
+            mkdir -p "${tmp_mnt}"
+            /bin/mount -r -t squashfs "${img_path}" "${tmp_mnt}"
+            if [ $? -ne 0 ]; then
+                echo ">> ERROR: while mounting squashfs ${img_path} to ${tmp_mnt}"
+                launch_interactive_shell
+            fi
+
+            if [ "${mountpoint}" = "/" ]; then
+                if [ -z "${lower_dirs}" ]; then
+                    lower_dirs="${tmp_mnt}"
+                else
+                    # OverlayFS'te sıralama (son eklenen en üstte olsun)
+                    lower_dirs="${tmp_mnt}:${lower_dirs}"
+                fi
+                squashfs_mounted="yes"
+            else
+                # Kök dışındaki squashfs'leri listeye ekle
+                non_root_squashfs="${non_root_squashfs} ${tmp_mnt}:${mountpoint}"
+            fi
+        fi
+    done < "${isomounts}"
+
+    # 2. Aşama: Kök dizini OverlayFS olarak newroot'a bağla
+    if [ "${squashfs_mounted}" = "yes" ]; then
+        msg ":: Mounting root (overlayfs) filesystem"
+        mkdir -p "${newroot}"
+        /bin/mount -t overlay overlay -o lowerdir="${lower_dirs}",upperdir=/rw_branch/upper,workdir=/rw_branch/work "${newroot}"
+        if [ $? -ne 0 ]; then
+            echo ">> ERROR: while mounting root (overlayfs) filesystem."
+            launch_interactive_shell
+        fi
+        msg "::: Root filesystem mounted successfully at ${newroot}"
+    else
+        echo ">> ERROR: No squashfs images found to mount as root!"
         launch_interactive_shell
     fi
 
-    msg ":: Mounting images"
+    # 3. Aşama: Kök dışındaki squashfs'leri newroot içine bind mount et
+    for item in ${non_root_squashfs}; do
+        local src="${item%%:*}"
+        local mnt="${item#*:}"
+        msg "::: Binding non-root squashfs branch ${src} to ${newroot}${mnt}"
+        _mnt_bind "${src}" "${newroot}${mnt}"
+    done
+
+    # 4. Aşama: bind tipindeki diğer imajları/dizinleri mount et
     while read img imgarch mountpoint type kernelarg; do
-        # check if this line is a comment (starts with #)
         [ "${img#"#"}" != "${img}" ] && continue
-
         [ "$imgarch" != "$arch" ] && continue
-
         [ ! -r "/bootmnt/${misobasedir}/${img}" ] && continue
 
-        # check if the overlay should be loaded
-        overlay_arg_available "$kernelarg"
-
-        if [ $? == 1 ] && [ "$kernelarg" != "" ]; then
-	        continue
+        if [ -n "${kernelarg}" ]; then
+            overlay_arg_available "$kernelarg"
+            [ $? == 1 ] && continue
         fi
 
         if [ "${type}" = "bind" ]; then
             _mnt_bind "/bootmnt/${misobasedir}/${img}" "${newroot}${mountpoint}"
-        elif [ "${type}" = "squashfs" ]; then
-            _mnt_squashfs "/bootmnt/${misobasedir}/${img}" "${newroot}${mountpoint}"
         fi
     done < "${isomounts}"
 

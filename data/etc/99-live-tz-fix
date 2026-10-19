@@ -1,0 +1,21 @@
+#!/bin/sh
+# /etc/NetworkManager/dispatcher.d/99-live-tz-fix
+
+INTERFACE="$1"
+ACTION="$2"
+
+# Sadece ağ arayüzü "up" (bağlandı) olduğunda çalış
+[ "$ACTION" = "up" ] || exit 0
+
+# Ağ geldiğinde GeoIP sorgusunu yap
+TZ=$(curl -s --max-time 5 "http://ip-api.com/line?fields=timezone" | tr -d ' \r\n')
+
+case "$TZ" in
+    */*)
+        if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+            ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+            # Başarıyla kurulduktan sonra bu dispatcher betiğini ve kendisini kalıcı olarak sil
+            rm -f /etc/NetworkManager/dispatcher.d/99-live-tz-fix
+        fi
+        ;;
+esac

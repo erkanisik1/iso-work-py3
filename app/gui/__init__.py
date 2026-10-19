@@ -17,8 +17,26 @@ import locale
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTranslator, QLocale
 
-# Main form
-from app.gui.main import MainWindow
+# Arayuz tercihleri (dil secimi)
+from app.gui import settings as gui_settings
+
+
+def _apply_language_env():
+    """Kayitli dil tercihini ortam degiskenlerine yazar.
+
+    ONEMLI: main.py gettext'i import aninda kuruyor. Bu yuzden dil
+    ayari MainWindow import edilmeden ONCE ortama yazilmali.
+
+    Doner: kullanilacak dil kodu (kayitli dil yoksa sistem dili).
+    """
+    system_locale = QLocale.system().name()  # orn. 'tr_TR'
+    saved = gui_settings.get_saved_language()
+    if saved:
+        os.environ["LANGUAGE"] = saved
+        # Bazi araclar LANGUAGE'i yok sayar; LANG'i da esle.
+        os.environ["LANG"] = saved + ".UTF-8"
+        return saved
+    return system_locale
 
 
 def gui(args):
@@ -30,27 +48,37 @@ def gui(args):
     # Create applicatin
     app = QApplication(args)
 
+    # Dil secimi: kayitli tercih sistem dilinden onceliklidir.
+    # MainWindow bu noktadan SONRA import edilmeli.
+    system_locale = _apply_language_env()
+
+    from app.gui.main import MainWindow
+
     # Setup translations
     translator_code = QTranslator()
     translator_ui = QTranslator()
+    translator_qt = QTranslator()
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    
-    # Get system locale
-    system_locale = QLocale.system().name()  # e.g., 'tr_TR'
-    
+
     # Try to load translation files
     qm_code = os.path.join(project_root, 'locale', system_locale, 'LC_MESSAGES', 'pisiman.qm')
     qm_ui = os.path.join(project_root, 'locale', system_locale, 'LC_MESSAGES', 'pisiman_ui.qm')
-    
+    # Qt'nin kendi diyalog dizgileri (sistemde qt_tr.qm yoksa diye uygulama ile gelir)
+    qm_qt = os.path.join(project_root, 'locale', system_locale, 'LC_MESSAGES', 'qt_dialogs.qm')
+
     loaded = []
     if os.path.exists(qm_code) and translator_code.load(qm_code):
         app.installTranslator(translator_code)
         loaded.append("code")
-    
+
     if os.path.exists(qm_ui) and translator_ui.load(qm_ui):
         app.installTranslator(translator_ui)
         loaded.append("UI")
-    
+
+    if os.path.exists(qm_qt) and translator_qt.load(qm_qt):
+        app.installTranslator(translator_qt)
+        loaded.append("Qt")
+
     if loaded:
         print(f"Loaded translations ({system_locale}): {', '.join(loaded)}")
     else:

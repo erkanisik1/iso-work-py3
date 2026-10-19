@@ -1,0 +1,198 @@
+run_hook() {
+    local log_file="/run/live_loop_mnt.log"
+    echo "=== live_loop_mnt hook log ===" > "${log_file}"
+    echo "cmdline: $(cat /proc/cmdline)" >> "${log_file}"
+
+    log_msg() {
+        echo "$1"
+        echo "$1" >> "${log_file}"
+    }
+
+    log_msg "!!! live_loop_mnt hook started. !!!"
+
+    if modprobe loop 2>>"${log_file}"; then
+        log_msg "!!! loop module loaded. !!!"
+    else
+        log_msg "WARNING: loop module failed!"
+    fi
+
+    mkdir -p /bootmnt
+
+    local iso_filename=""
+
+    local _raw=""
+    _raw=$(cat /proc/cmdline | tr ' ' '\n' | grep "^iso_filename=" | head -1)
+    if [ -n "${_raw}" ]; then
+        iso_filename="${_raw#*=}"
+    fi
+
+    local img_dev=""
+    local img_loop=""
+    for _raw in $(cat /proc/cmdline | tr ' ' '\n' | grep -E "^(img_dev=|img_loop=)"); do
+        case ${_raw} in
+            img_dev=*)  img_dev="${_raw#*=}" ;;
+            img_loop=*) img_loop="${_raw#*=}" ;;
+        esac
+    done
+    img_dev=$(echo "${img_dev}" | tr -d '"')
+    img_loop=$(echo "${img_loop}" | tr -d '"')
+
+    # 1. img_dev/img_loop ile dogrudan mount (Ventoy enjekte eder)
+    if [ -n "${img_dev}" ] && [ -n "${img_loop}" ]; then
+        log_msg "!!! img_dev/img_loop found: dev='${img_dev}' loop='${img_loop}' !!!"
+        local real_dev=""
+        if echo "${img_dev}" | grep -qi "^UUID="; then
+            real_dev=$(blkid -U "${img_dev#*=}" 2>/dev/null)
+        elif echo "${img_dev}" | grep -qi "^LABEL="; then
+            real_dev=$(blkid -L "${img_dev#*=}" 2>/dev/null)
+        elif [ -b "${img_dev}" ]; then
+            real_dev="${img_dev}"
+        fi
+        [ -z "${real_dev}" ] && real_dev="${img_dev}"
+        local _w=0
+        while [ ${_w} -lt 6 ]; do
+            [ -b "${real_dev}" ] && break
+            sleep 1
+            _w=$((_w+1))
+        done
+        if [ -b "${real_dev}" ]; then
+            mkdir -p /run/img_dev
+            if mount -o ro "${real_dev}" /run/img_dev 2>>"${log_file}"; then
+                log_msg "!!! Device mounted. Trying loopback mount... !!!"
+                local _loop=$(losetup --find --show -r "/run/img_dev${img_loop}" 2>>"${log_file}")
+                if [ -n "${_loop}" ]; then
+                    if mount -r -t iso9660 -o noatime "${_loop}" /bootmnt 2>>"${log_file}"; then
+                        if [ -f "/bootmnt/.miso" ]; then
+                            log_msg "!!! ISO mounted via img_dev/img_loop: ${img_loop} !!!"
+                            export pisi_live_loop_mounted=1
+                            umount /run/img_dev 2>>"${log_file}"
+                            rmdir /run/img_dev 2>/dev/null
+                            return 0
+                        fi
+                        umount /bootmnt 2>>"${log_file}"
+                    fi
+                    losetup -d "${_loop}" 2>>"${log_file}"
+                fi
+                umount /run/img_dev 2>>"${log_file}"
+            fi
+            rmdir /run/img_dev 2>/dev/null
+        fi
+        log_msg "!!! img_dev/img_loop mount failed, scanning partitions... !!!"
+    else
+        log_msg "!!! img_dev/img_loop not in cmdline, scanning partitions... !!!"
+    fi
+
+    # 2. Partition tara + filename eslestir + fallback
+    mkdir -p /run/live_scan_mnt
+
+    for part in /dev/sd[a-z][0-9]* /dev/sd[a-z] \
+                /dev/nvme[0-9]*n[0-9]p[0-9]* /dev/nvme[0-9]*n[0-9] \
+                /dev/mmc[0-9]*; do
+        [ -b "${part}" ] || continue
+        fstype=$(blkid -s TYPE -o value "${part}" 2>/dev/null)
+        [ -z "${fstype}" ] && continue
+        [ "${fstype}" = "swap" ] && continue
+        [ "${fstype}" = "LVM2_member" ] && continue
+
+        log_msg "  -> Scanning partition: ${part} (${fstype})"
+        if mount -r -t "${fstype}" -o noatime "${part}" /run/live_scan_mnt 2>>"${log_file}"; then
+            if [ -f "/run/live_scan_mnt/.miso" ]; then
+                log_msg "  -> Direct .miso found: ${part}"
+                umount /run/live_scan_mnt 2>>"${log_file}"
+                if mount -r -o noatime "${part}" /bootmnt 2>>"${log_file}"; then
+                    log_msg "!!! .miso FOUND! Device: ${part} !!!"
+                    export pisi_live_loop_mounted=1
+                    rmdir /run/live_scan_mnt 2>/dev/null
+                    return 0
+                fi
+            fi
+
+            found_iso=""
+            _iso_list="/tmp/iso_find_list.txt"
+            rm -f "${_iso_list}" 2>/dev/null
+
+            if command -v find >/dev/null 2>&1; then
+                find /run/live_scan_mnt -type f \( -iname "*.iso" -o -iname "*.iso9660" \) 2>/dev/null > "${_iso_list}"
+            fi
+
+            if [ ! -s "${_iso_list}" ]; then
+                for iso_path in /run/live_scan_mnt/*.iso \
+                                /run/live_scan_mnt/*.ISO \
+                                /run/live_scan_mnt/ISO/*.iso \
+                                /run/live_scan_mnt/ISO/*.ISO \
+                                /run/live_scan_mnt/isos/*.iso; do
+                    [ -f "${iso_path}" ] && echo "${iso_path}" >> "${_iso_list}"
+                done
+            fi
+
+            if [ -s "${_iso_list}" ]; then
+                _fallback_iso=""
+                _fallback_loop=""
+                while read iso_path; do
+                    [ -z "${iso_path}" ] && continue
+                    log_msg "  -> ISO found: ${iso_path}"
+                    local _loop=$(losetup --find --show -r "${iso_path}" 2>>"${log_file}")
+                    if [ -n "${_loop}" ]; then
+                        if mount -r -t iso9660 -o noatime "${_loop}" /bootmnt 2>>"${log_file}"; then
+                            if [ -f "/bootmnt/.miso" ]; then
+                                local _match=0
+                                # Dosya adi ile eslestir
+                                if [ ${_match} -eq 0 ] && [ -n "${iso_filename}" ]; then
+                                    local _bn=""
+                                    _bn=$(basename "${iso_path}" 2>/dev/null)
+                                    if [ "${iso_filename}" = "${_bn}" ]; then
+                                        _match=1
+                                        log_msg "  -> Filename matched: ${iso_filename}"
+                                    else
+                                        log_msg "  -> Filename mismatch (expected: ${iso_filename}, got: ${_bn})"
+                                    fi
+                                fi
+                                if [ ${_match} -eq 1 ]; then
+                                    log_msg "!!! .miso FOUND! ISO: ${iso_path} - ACCEPTED !!!"
+                                    export pisi_live_loop_mounted=1
+                                    found_iso="yes"
+                                    break
+                                else
+                                    if [ -z "${_fallback_iso}" ]; then
+                                        _fallback_iso="${iso_path}"
+                                        _fallback_loop="${_loop}"
+                                    fi
+                                fi
+                            fi
+                            umount /bootmnt 2>>"${log_file}"
+                        fi
+                        if [ -z "${found_iso}" ]; then
+                            if [ "${_loop}" != "${_fallback_loop}" ]; then
+                                losetup -d "${_loop}" 2>>"${log_file}"
+                            fi
+                        fi
+                    fi
+                done < "${_iso_list}"
+
+                if [ -z "${found_iso}" ] && [ -n "${_fallback_iso}" ]; then
+                    log_msg "  -> No filename match, trying fallback ISO: ${_fallback_iso}"
+                    if mount -r -t iso9660 -o noatime "${_fallback_loop}" /bootmnt 2>>"${log_file}"; then
+                        if [ -f "/bootmnt/.miso" ]; then
+                            log_msg "!!! Fallback ISO accepted: ${_fallback_iso} !!!"
+                            export pisi_live_loop_mounted=1
+                            found_iso="yes"
+                        else
+                            umount /bootmnt 2>>"${log_file}"
+                        fi
+                    fi
+                fi
+            fi
+            rm -f "${_iso_list}" 2>/dev/null
+
+            if [ "${found_iso}" = "yes" ]; then
+                umount /run/live_scan_mnt 2>>"${log_file}"
+                rmdir /run/live_scan_mnt 2>/dev/null
+                return 0
+            fi
+            umount /run/live_scan_mnt 2>>"${log_file}"
+        fi
+    done
+
+    rmdir /run/live_scan_mnt 2>/dev/null
+    log_msg "!!! RESULT: No .miso found on any partition. !!!"
+}

@@ -165,7 +165,7 @@ mount_rootfs() {
 find_live_mount() {
     modprobe -bqa usb-storage udf
     ##### ben
-    modprobe -a sr_mod isofs usb-storage overlay cdrom dm-mod iso9660 udf vfat loop
+    modprobe -a sr_mod isofs usb-storage overlay cdrom dm-mod iso9660 udf vfat loop exfat ntfs3
     if [ "$#" -gt "0" ]
     then
         for x in $*
@@ -225,7 +225,7 @@ find_live_mount() {
                         # ISO'nun gerçekte olduğu bölümü bul
                         for data_dev in /dev/sd[a-z][0-9]; do
                             mkdir -p /mnt/data_check
-                            for fstype in exfat ntfs vfat; do
+                            for fstype in exfat ntfs vfat ntfs3; do
                                 mount -t $fstype "$data_dev" /mnt/data_check 2>/dev/null
                                 if [ $? -eq 0 ]; then
                                     if [ -f "/mnt/data_check/$ISO_PATH" ]; then
@@ -263,7 +263,7 @@ find_live_mount() {
 
         for dev in $IMG_DEV; do
             mkdir -p /mnt/iso_source
-            for fstype in exfat ntfs vfat auto; do
+            for fstype in exfat ntfs vfat ntfs3 auto; do
                 mount -t $fstype "$dev" /mnt/iso_source 2>/dev/null
                 if [ $? -eq 0 ]; then
                     if [ -f "/mnt/iso_source/$IMG_LOOP" ]; then
@@ -292,7 +292,7 @@ find_live_mount() {
         info "Checking device: $dev"
 
         mkdir -p /mnt/ventoy
-        for fstype in exfat ntfs vfat auto; do
+        for fstype in exfat ntfs vfat ntfs3 auto; do
             mount -t $fstype "$dev" /mnt/ventoy 2>/dev/null
             if [ $? -eq 0 ]; then
                 for iso in /mnt/ventoy/*.iso; do
@@ -615,7 +615,7 @@ mkdir -m 0755 /dev/pts
 mount -t devpts -o gid=5,mode=620 devpts /dev/pts
 
 #07032023 iptal edildi. Erkan ışık
-modprobe -a sr_mod isofs usb-storage overlay dm-mod iso9660 cdrom isofs vfat loop efivarfs
+modprobe -a sr_mod isofs usb-storage overlay dm-mod iso9660 cdrom isofs vfat loop
 
 # First parse config file, then cmdline to allow overwriting internal config
 if [ -f "$INITRAMFSCONF" ]

@@ -1,0 +1,5 @@
+name: "pisi"
+description: "Pisi Linux Theme"
+author: "ERkan ISIK"
+version: "1.0.0"
+main: "index.html"

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Package Manager
+Name[tr]=Paket Yöneticisi
+GenericName=Add or Remove Software
+GenericName[tr]=Yazılım ekle veya kaldır
+Comment=PiSi Package Manager Graphical User Interface
+Comment[tr]=PİSİ paket yöneticisinin grafik ara yüzü
+Icon=application-x-pisi
+Type=Application
+Exec=package-manager --show-mainwindow
+Categories=Qt;KDE;System;
+X-XFCE-Source=file:///usr/share/applications/package-manager.desktop

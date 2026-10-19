@@ -1,0 +1,272 @@
+:root {
+    --logo-main-color: #ffffff; /* Logonun tüm rengini buradan değiştir */
+}
+
+
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center; 
+    align-items: center; 
+    background: url('../media/wallpapers/4.jpg') no-repeat center center fixed;
+    background-size: cover;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+}
+
+
+#top-bar {
+    position: fixed;
+    top: 0;
+    width: 100%;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: space-between; 
+    align-items: center;
+    padding: 0 20px;
+    color: #d3d1d1;
+    z-index: 1000;
+}
+
+.svg-icon{
+    fill: #d3d1d1;
+    color: #d3d1d1;
+}
+
+.system-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.system-controls button {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 1.1rem;
+    cursor: pointer;
+    width: auto;   
+    height: auto; 
+    padding: 5px;
+    margin: 0;
+    transition: opacity 0.2s;
+}
+
+.system-controls button:hover {
+    opacity: 0.7;
+    background: transparent;
+}
+
+.date-time-wrapper {
+    display: flex;
+    gap: 15px;
+    font-size: 0.9rem;
+}
+
+.login {
+    bacgkground: rgba(0, 0, 0, 0.6);
+    bagckdrop-filter: blur(15px);
+    padding: 40px 30px 30px 30px; /* Üst padding artırıldı */
+    bogrder-radius: 20px; /* "bordder" yazım hatası düzeltildi */
+    bgorder: 1px solid rgba(255, 255, 255, 0.1);
+    width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    box-gshadow: 0 10px 30px rgba(255,255,255,0.2);
+}
+
+/* Form Elemanları */
+input, select, button {
+    width: 100%;
+    height: 45px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    padding: 0 15px;
+    font-size: 1rem;
+    outline: none;
+}
+
+
+select option {
+    background: #222;
+    color: white;
+}
+
+button {
+    background: #3498db;
+    border: none;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+    margin-bottom: 0; /* En alttaki eleman */
+}
+
+button:hover {
+    background: #2980b9;
+    transform: translateY(-2px);
+}
+
+#error-message {
+    color: #ff6b6b;
+    margin-top: 15px;
+    font-size: 0.85rem;
+    min-height: 20px;
+}
+
+.nav-icon {
+    display: block;    /* Gizli kalmasını engeller */
+    width: 20px !important; 
+    height: 20px !important;
+    min-width: 20px;
+    min-height: 20px;
+    filter: invert(1); /* İkon siyahsa beyaz yapar */
+}
+
+.system-controls button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 5px 10px;
+    transition: transform 0.2s ease;
+}
+
+.system-controls button:hover {
+    transform: scale(1.1); 
+}
+
+/* Sanal Klavye */
+.simple-keyboard {
+    position: fixed;
+    bottom: 0;
+   
+    width: 90%;
+    background-color: #1a1a1a;
+    padding: 10px;
+    box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    display: none; /* Başlangıçta gizli */
+}
+
+/* Klavye butonları */
+.simple-keyboard .hg-button {
+    background: #c72e2e;
+    color: #807d7d;
+    border: 1px solid #444;
+    border-radius: 5px;
+    padding: 10px;
+    margin: 3px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.simple-keyboard .hg-button:hover {
+    background: #444;
+}
+
+.simple-keyboard .hg-button:active {
+    background: #555;
+}
+
+.nav-icon.active {
+    filter: invert(0.5) sepia(1) saturate(5) hue-rotate(175deg); /* Mavi tonu verir */
+}
+
+.top-bar-select {
+    background: transparent;
+    border: none;
+    color: #898989;
+    font-size: 0.8rem;
+    padding: 2px 5px;
+    width: auto; /* Kutu gibi değil, yazı gibi dursun */
+    height: auto;
+    cursor: pointer;
+    margin: 0 5px;
+}
+
+.top-bar-select option {
+    background: #222;
+    color: #898989;
+}
+
+.right-controls {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+#battery-status {
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#user-list {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+   
+}
+
+
+#session-list {
+    background: transparent;
+    border: none;
+    color: #898989;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+#session-list:hover {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+
+.logo-wrapper {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 30px; 
+}
+
+.logo-wrapper img {
+    max-width: 150px; 
+    height: auto;
+    display: block;
+}
+
+
+#user-list, #password, #login-button {
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+img:hover{background: #4C4C4C;padding: 10px;}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+    20%, 40%, 60%, 80% { transform: translateX(10px); }
+}
+
+.shake {
+    animation: shake 0.5s;
+}

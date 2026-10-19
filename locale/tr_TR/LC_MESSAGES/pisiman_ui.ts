@@ -180,7 +180,7 @@
     <message>
         <location filename="../../../app/gui/ui/main.ui" line="234" />
         <source>Installation Collection List</source>
-        <translation type="unfinished" />
+        <translation>Kurulum Koleksiyon Listesi</translation>
     </message>
     <message>
         <location filename="../../../app/gui/ui/main.ui" line="244" />
@@ -322,7 +322,7 @@
     <message>
         <location filename="../../../app/gui/ui/mainv2.ui" line="29" />
         <source>Genel</source>
-        <translation type="unfinished" />
+        <translation>Genel</translation>
     </message>
     <message>
         <location filename="../../../app/gui/ui/mainv2.ui" line="77" />
@@ -343,7 +343,7 @@
         <location filename="../../../app/gui/ui/mainv2.ui" line="169" />
         <source>Use project dir as iso
 output dir</source>
-        <translation type="unfinished" />
+        <translation>Proje dizinini ISO çıktı dizini olarak kullan</translation>
     </message>
     <message>
         <location filename="../../../app/gui/ui/mainv2.ui" line="274" />
@@ -384,6 +384,31 @@ output dir</source>
         <location filename="../../../app/gui/ui/mainv2.ui" line="543" />
         <source>Remove Missing Packages</source>
         <translation>Eksik Paketleri Kaldır</translation>
+    </message>
+    <message>
+        <location filename="../../../app/gui/ui/mainv2.ui" line="360" />
+        <source>Sistem Ayarları</source>
+        <translation>Sistem Ayarları</translation>
+    </message>
+    <message>
+        <location filename="../../../app/gui/ui/mainv2.ui" line="370" />
+        <source>lsb-release</source>
+        <translation>lsb-release</translation>
+    </message>
+    <message>
+        <location filename="../../../app/gui/ui/mainv2.ui" line="380" />
+        <source>os-release</source>
+        <translation>os-release</translation>
+    </message>
+    <message>
+        <location filename="../../../app/gui/ui/mainv2.ui" line="390" />
+        <source>pisilinux-release</source>
+        <translation>pisilinux-release</translation>
+    </message>
+    <message>
+        <location filename="../../../app/gui/ui/mainv2.ui" line="403" />
+        <source>Tüm Değişiklileri Kaydet</source>
+        <translation>Tüm Değişiklikleri Kaydet</translation>
     </message>
 </context>
 <context>
@@ -454,7 +479,7 @@ output dir</source>
     <message>
         <location filename="../../../app/gui/ui/packages.ui" line="82" />
         <source>Component+ Packages</source>
-        <translation type="unfinished" />
+        <translation>Bileşen+ Paketler</translation>
     </message>
     <message>
         <location filename="../../../app/gui/ui/packages.ui" line="108" />

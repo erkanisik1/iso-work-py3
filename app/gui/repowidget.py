@@ -31,7 +31,7 @@ class RepoWidget(QWidget):
         self.repo_path = None
         
     def open(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Open Repository JSON", os.getcwd(), "JSON files (*.json)")
+        filename, _ = QFileDialog.getOpenFileName(self, "Open Repository JSON", os.getcwd(), "JSON files (*.json)", options=QFileDialog.Option.DontUseNativeDialog)
         if filename:
             self.repo_path = filename
             self.load()

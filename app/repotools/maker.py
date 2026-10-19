@@ -9,7 +9,10 @@ from app.repotools.iso_ops import make_iso
 def maker(command, project_name):
     from app.repotools.project import Project
     project = Project()
-    project.load(project_name)
+    err = project.open(project_name)
+    if err:
+        print("ERROR: %s" % err)
+        return
     
     if command == "make-repo":
         make_repos(project)

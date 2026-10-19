@@ -1,10 +1,10 @@
 insmod iso9660
 insmod part_gpt
 insmod part_msdos
-insmod udf
 insmod fat
-
-
+insmod udf
+insmod ext2
+insmod gzio
 
 function load_video {
   if [ x$feature_all_video_module = xy ]; then
@@ -21,112 +21,83 @@ function load_video {
 }
 
 search --set=cdrom --file /.miso
-# if loadfont ($cdrom)/EFI/boot/unicode.pf2 ; then
-    set gfxmode=1024x768
-    load_video
-    insmod gfxterm
-# fi
+set root=$cdrom
 
+
+insmod font
+insmod gettext
+
+loadfont ($root)/EFI/BOOT/grub2/themes/pisilinux/terminus-14.pf2
+loadfont ($root)/EFI/BOOT/grub2/themes/pisilinux/unifont-regular-16.pf2
+
+
+
+# Grafik Modu Ayarları
+set gfxmode=auto
+set gfxpayload=keep
+set gfxterm_font=Unifont
+load_video
+insmod gfxterm
 terminal_input console
 terminal_output gfxterm
 
 
 insmod gfxmenu
-
-# fonts
-%(fonts)s
-
 insmod png
 insmod jpeg
-#set theme=($root)/boot/grub/themes/pisilinux/theme.txt
-set theme=($cdrom)/EFI/boot/grub2/themes/pisilinux/theme.txt
+
+# TEMA YÜKLEME
+set theme=($root)/EFI/BOOT/grub2/themes/pisilinux/theme.txt
 export theme
-if [ x$feature_timeout_style = xy ] ; then
-  set timeout_style=menu
-  set timeout=10
-# Fallback normal timeout code in case the timeout_style feature is
-# unavailable.
-else
-  set timeout=10
-fi
 
+set timeout_style=menu
+set timeout=10
 
-
-insmod keylayouts
 set menu_color_normal=white/black
 set menu_color_highlight=white/red
 
 
-search --set=root --file /.miso
-
-
 
 submenu "Türkçe" --class lang_tr {
-  load_video
-  set gfxpayload=keep
-  insmod gzio
-  insmod part_msdos
-  insmod ext2
-  #terminal_input at_keyboard
 
-    set menu_color_normal=white/black
-    set menu_color_highlight=white/red
-
-    # keymap /EFI/boot/tr.gkb
-    # set locale_dir=$prefix/locale
-    # set lang="tr_TR"
-    # set locale="tr_TR.UTF-8"
-    menuentry "PisiLinux %(version)s UEFI - GPT Kurucusu" --class pisilinux{
-        load_video
-        linux /pisi/boot/kernel %(initcpio)s mudur="language:tr,live" quiet splash ---
+    menuentry "PisiLinux UEFI - GPT Kurucusu" --class pisilinux {
+        linux /pisi/boot/kernel rdinit=/init mudur="language:tr,live" img_dev=$img_dev img_loop=$img_loop %(iso_cmdline)s quiet splash ---
         initrd /pisi/boot/initrd
     }
-    #18-08-2022 tarihinde kapatıldı
-    #menuentry "PisiLinux %(version)s AMD UEFI - GPT Kurucusu" --class pisilinux{
-    #    load_video
-    #    linux /pisi/boot/kernel %(initcpio)s mudur="language:tr,live" quiet splash ---
-    #    initrd /pisi/boot/amd-ucode.img /pisi/boot/initrd
-    #}
 
-    menuentry "PisiLinux %(version)s UEFI - Güvenli Mod"  --class pisilinux {
-        load_video
-        linux /pisi/boot/kernel %(initcpio)s mudur="language:tr,live,safe" quiet splash ---
+    menuentry "PisiLinux UEFI - Güvenli Mod" --class pisilinux {
+        linux /pisi/boot/kernel rdinit=/init mudur="language:tr,live,safe" img_dev=$img_dev img_loop=$img_loop %(iso_cmdline)s quiet splash ---
         initrd /pisi/boot/initrd
     }
-    %(rescue_tr)s
+
+    menuentry "PisiLinux UEFI - Kurtarıcı" --class recovery {
+        linux /pisi/boot/kernel rdinit=/init yali=rescue img_dev=$img_dev img_loop=$img_loop %(iso_cmdline)s quiet splash ---
+        initrd /pisi/boot/initrd
+    }
+
     menuentry "Yeniden Başlat" --class restart {
         reboot
     }
 
-    menuentry 'UEFI Yapılandırması' --class efi {
+    menuentry "UEFI Yapılandırması" --class efi {
         fwsetup
     }
 }
 
-
-
 submenu "English" --class lang_en_us {
-    load_video
-    set gfxpayload=keep
-    insmod gzio
-    insmod part_msdos
-    insmod ext2
-    #terminal_input at_keyboard
 
-    set menu_color_normal=white/black
-    set menu_color_highlight=white/blue
-
-    # keymap /EFI/boot/en.gkb
-    # set lang=en
-    menuentry "PisiLinux %(version)s UEFI - GPT Installing" {
-        load_video
-        linux /pisi/boot/kernel %(initcpio)s quiet ---
+    menuentry "PisiLinux UEFI - GPT Installing" --class pisilinux {
+        linux /pisi/boot/kernel rdinit=/init mudur="language:en,live" img_dev=$img_dev img_loop=$img_loop %(iso_cmdline)s quiet splash ---
         initrd /pisi/boot/initrd
     }
-    %(rescue_eng)s
-    #menuentry "PisiLinux %(version)s AMD UEFI - GPT Installing" {
-        load_video
-        linux /pisi/boot/kernel %(initcpio)s kms quiet amdgpu.vm_fragment_size=9 acpi=no iommu=pt pci=noaer rcu_nocbs=0-7 ivrs_ioapic[4]=00:14.0 ivrs_ioapic[5]=00:00.2 idle=nomwait psmouse.proto=imps quiet ---
+
+    menuentry "PisiLinux UEFI - Safe Mode" --class pisilinux {
+        linux /pisi/boot/kernel rdinit=/init mudur="language:en,live,safe" img_dev=$img_dev img_loop=$img_loop %(iso_cmdline)s quiet splash ---
+        initrd /pisi/boot/initrd
+    }
+
+    menuentry "PisiLinux UEFI - Rescue" --class recovery {
+        linux /pisi/boot/kernel rdinit=/init yali=rescue img_dev=$img_dev img_loop=$img_loop %(iso_cmdline)s quiet splash ---
         initrd /pisi/boot/initrd
     }
 
@@ -134,7 +105,7 @@ submenu "English" --class lang_en_us {
         reboot
     }
 
-    menuentry 'System setup' --class efi {
+    menuentry "System setup" --class efi {
         fwsetup
     }
 }

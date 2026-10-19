@@ -14,3 +14,15 @@ projectFiles/
 .idea/
 .01/
 .02/
+
+# Yedek / geçici dosyalar (sürüm kontrolüne girmez)
+*.bak
+*.tar.gz
+* copy
+*.saglam
+*yedek*
+*orjinal-*
+Yeni Klasör/
+data/bck-efi/
+data/initramfs/lib/initramfs/init-live.txt
+data/initcpio/hooks/miso.txt

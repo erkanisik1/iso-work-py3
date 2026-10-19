@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="assets/css/main.css">
+    <link rel="stylesheet" href="assets/css/simple-keyboard.css">
+</head>
+<body>
+    <div id="top-bar">
+ 
+        <div class="system-controls">
+            <button onclick="lightdm.shutdown()" title="Kapat"  >
+                <img src="assets/media/icons/shutdown.svg" alt="Shutdown">       
+            </button>
+            <button onclick="lightdm.restart()" title="Yeniden Başlat">
+                <img src="assets/media/icons/restart.svg" alt="Restart" >
+            </button>
+            <button onclick="lightdm.suspend()" title="Uyku">
+                <img src="assets/media/icons/suspend.svg" alt="Suspend" >        
+            </button>
+            
+            <button onclick="toggleKeyboard()" title="Sanal Klavye" class="top-bar-keyboard">
+                            
+            </button>
+
+            <select id="session-list" class="top-bar-select"></select>
+                
+            <select id="language-list" class="top-bar-select" onchange="changeLanguage(this.value)">
+                <option value="tr">TR</option>
+                <option value="us">EN</option>
+            </select>
+        </div>
+        <div class="right-controls">
+        	<div id="battery-status" class="top-bar-item">
+                    <span id="battery-level">--%</span>
+                    <span id="battery-icon">🔋</span>
+                </div>
+            <div class="date-time-wrapper">
+                <span id="clock"></span>/
+                <span id="date"></span>
+            </div>
+        </div>
+    </div>
+
+   <div class="login" id="login-container">
+    <div class="logo-wrapper">
+        <img src="assets/media/logotype-pisi-1.svg" alt="">
+    </div>
+
+    <select id="user-list"></select>
+    <input type="password" id="password" placeholder="Şifre">
+    <button id="login-button">Giriş Yap</button>
+    <div id="error-message"></div>
+</div>
+    <script src="assets/js/jquery-3.7.1.min.js"></script>
+  
+    <script src="assets/js/main.js"></script>
+    <script src="assets/js/simple-keyboard.js"></script>
+    <div class="simple-keyboard"></div>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "mrtthings@gmail.com",
+                "Name": "Murat Özgün",
+                "Name[tr]": "Murat Özgün"
+            }
+        ],
+        "Id": "BlackRose",
+        "License": "LGPLv3",
+        "Name": "Black Rose",
+        "Name[tr]": "Kara Gül"
+    }
+}

@@ -1,0 +1,101 @@
+#top-bar {
+    position: fixed;
+    top: 0;
+    width: 100%;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: space-between; 
+    align-items: center;
+    padding: 0 20px;
+    color: #d3d1d1;
+    z-index: 1000;
+}
+
+
+
+.system-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.system-controls button {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 1.1rem;
+    cursor: pointer;
+    width: auto;   
+    height: auto; 
+    padding: 5px;
+    margin: 0;
+    transition: opacity 0.2s;
+}
+
+.system-controls button:hover {
+    opacity: 0.7;
+    background: transparent;
+}
+.system-controls button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 5px 10px;
+    transition: transform 0.2s ease;
+}
+
+.system-controls button:hover {
+    transform: scale(1.1); 
+}
+#session-list {
+    background: transparent;
+    border: none;
+    color: #d3d1d1;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+#session-list:hover {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.top-bar-select {
+    background: transparent;
+    border: none;
+    color: #d3d1d1;
+    font-size: 0.8rem;
+    padding: 2px 5px;
+    width: auto; /* Kutu gibi değil, yazı gibi dursun */
+    height: auto;
+    cursor: pointer;
+    margin: 0 5px;
+}
+
+.top-bar-select option {
+    background: #222;
+    color: #d3d1d1;
+}
+
+.right-controls {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+#battery-status {
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.date-time-wrapper {
+    display: flex;
+    gap: 15px;
+    font-size: 0.9rem;
+}

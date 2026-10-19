@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Bluetooth Ses Cihazi Izleyici
+Comment=Eylesmis ve guvenilir Bluetooth ses cihazlarini bagli tutar
+Exec=/usr/bin/bt-watch start
+NoDisplay=true
+Terminal=false
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-Phase=Applications

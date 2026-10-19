@@ -1,6 +1,13 @@
 # vim: set ft=sh:
 
 run_hook () {
+    # Ventoy parametrelerini de kontrol et
+    if [ -z "${img_dev}" ] && [ -n "${vtoy_iso_part}" ]; then
+        img_dev="${vtoy_iso_part}"
+    fi
+    if [ -z "${img_loop}" ] && [ -n "${vtoy_iso_path}" ]; then
+        img_loop="${vtoy_iso_path}"
+    fi
     if [ -n "${img_dev}" ] && [ -n "${img_loop}" ]; then
         mount_handler="miso_loop_mount_handler"
     fi

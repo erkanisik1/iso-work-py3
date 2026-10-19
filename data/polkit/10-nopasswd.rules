@@ -1,0 +1,5 @@
+polkit.addRule(function(action, subject) {
+        if (subject.user == "pisi") {
+            return polkit.Result.YES;
+        }
+    });

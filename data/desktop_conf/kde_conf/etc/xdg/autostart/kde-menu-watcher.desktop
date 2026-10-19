@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=KDE Menu Watcher
+Comment=Watches application directories and updates KDE menu automatically
+Comment[tr]=Uygulama dizinlerini izler ve KDE menüyü otomatik olarak günceller
+Exec=/usr/local/bin/kde-menu-watcher
+Icon=utilities-terminal
+Type=Application
+Categories=Utilities;
+X-KDE-StartupNotify=false
+X-GNOME-Autostart-enabled=true

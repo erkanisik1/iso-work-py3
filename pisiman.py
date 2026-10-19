@@ -12,9 +12,66 @@
 #
 
 # System
+import os
 import sys
 import time
+import fcntl
 from app.repotools import packages
+
+
+def acquire_build_lock(work_dir):
+    """
+    Ayni WorkDir uzerinde ikinci bir kurulumu engeller.
+
+    make_image() her calistiginda image/ dizinini image_dir(clean=True)
+    ile SILER ve 1173 paketi bastan kurar. GUI'de "make-live" ve "make"
+    butonlarinin ikisi de make_image() cagirir; art arda basildiginda
+    ikinci kurulum oncekinin 40 dakikasini yok eder.
+
+    Bu kilit sayesinde ayni WorkDir'de ayni anda tek kurulum olur.
+    Islem bitince kilit otomatik birakilir (dosya taniticiya baglidir),
+    yanlislikla kalici bir kilit dosyasi birakmaz.
+
+    Dondurulmus (SIGSTOP) bir surec kilidi tutmaya devam eder; bu
+    durumda asagidaki mesaj gorunur ve kullanici sureci oldurebilir.
+
+    Doner:
+        dosya nesnesi  -> kilit alindi, kurulum devam edebilir
+        None           -> baska bir kurulum kilidi tutuyor, ABARTILMAMALI
+    Kilit dosyasi acilamazsa uyari verip None yerine gecici bir
+    nesne doner: koruma kullanilamaz ama kurulum engellenmez.
+    """
+    try:
+        os.makedirs(work_dir, exist_ok=True)
+        path = os.path.join(work_dir, ".build.lock")
+        fh = open(path, "w")
+    except OSError as e:
+        print("UYARI: kilit dosyasi olusturulamadi (%s); koruma devre disi" % e)
+        return open(os.devnull, "w")
+
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, OSError):
+        print("")
+        print("=" * 62)
+        print("HATA: bu dizin uzerinde zaten bir kurulum calisiyor:")
+        print("      %s" % work_dir)
+        print("")
+        print("Yeni kurulum oncekinin yaptiklarini SILER. Devam etmek")
+        print("istediginizden emin degilseniz o sureci durdurun:")
+        print("      pkill -f 'pisiman.py make'")
+        print("=" * 62)
+        print("")
+        fh.close()
+        return None
+
+    # sahibini gorunur kil
+    try:
+        fh.write("%d\n%s\n" % (os.getpid(), time.strftime("%Y-%m-%d %H:%M:%S")))
+        fh.flush()
+    except IOError:
+        pass
+    return fh
 
 
 def maker(op, project_file):
@@ -25,6 +82,15 @@ def maker(op, project_file):
     if err:
         print("ERROR: %s" % err)
         return
+
+    # Ayni WorkDir uzerinde ayni anda tek kurulum calissin.
+    # make_image() image/ dizinini silip bastan kurdugu icin ikinci bir
+    # calistirma ilkinin sonucunu yok eder.
+    _lock = None
+    if op in ("make", "make-live", "install-live"):
+        _lock = acquire_build_lock(project.work_dir)
+        if _lock is None:
+            sys.exit(1)
 
     start = time.time()
 

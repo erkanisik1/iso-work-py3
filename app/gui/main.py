@@ -13,6 +13,8 @@
 
 # System
 import os
+import sys
+import time
 import tempfile
 
 # Qt
@@ -23,8 +25,8 @@ except ImportError:
     HAS_QTERMWIDGET = False
 
 from PyQt6.QtWidgets import (QMessageBox, QMainWindow, QFileDialog,
-                             QListWidgetItem, QPlainTextEdit)
-from PyQt6.QtGui import QFont, QTextCursor, QAction
+                             QListWidgetItem, QPlainTextEdit, QMenu)
+from PyQt6.QtGui import QFont, QTextCursor, QAction, QActionGroup
 from PyQt6.QtCore import Qt, QProcess
 
 
@@ -51,36 +53,52 @@ import locale
 
 # Setup gettext for i18n
 # Get project root (where pisiman.py is located)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+# app/gui/main.py -> app/gui -> app -> root (3 kademe)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 locale_dir = os.path.join(project_root, 'locale')
+DATA_DIR = os.path.join(project_root, "data")
 
-# Try to use system locale, fallback to English
+# Dil tercihi: once kullanicinin kayitli secimi, yoksa sistem dili.
+# ONEMLI: gettext import aninda kuruldugu icin bu blok modul
+# yuklenirken calisir; app/gui/__init__.py de MainWindow'u import
+# etmeden once LANGUAGE/LANG'i ayarlar.
 try:
-    # Check if we have a locale set
-    current_lang = os.environ.get('LANGUAGE') or os.environ.get('LANG', '')
-    
-    # If running under sudo, LANG might be reset, so try to detect from user's locale
-    if not current_lang or current_lang.startswith('en'):
-        try:
-            # Try to get user's actual locale
-            import subprocess
-            result = subprocess.run(['locale'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if line.startswith('LANG='):
-                    user_lang = line.split('=')[1].strip('"')
-                    if user_lang and not user_lang.startswith('en'):
-                        current_lang = user_lang
-                    break
-        except:
-            pass
-    
+    from app.gui.settings import get_saved_language
+    saved_lang = get_saved_language()
+except Exception:
+    saved_lang = None
+
+try:
+    if saved_lang:
+        # Kullanici acikca dil sectiyse sistem dilini tahmin etme.
+        current_lang = saved_lang
+    else:
+        # Check if we have a locale set
+        current_lang = os.environ.get('LANGUAGE') or os.environ.get('LANG', '')
+
+        # If running under sudo, LANG might be reset, so try to detect from
+        # user's locale
+        if not current_lang or current_lang.startswith('en'):
+            try:
+                # Try to get user's actual locale
+                import subprocess
+                result = subprocess.run(['locale'], capture_output=True, text=True)
+                for line in result.stdout.split('\n'):
+                    if line.startswith('LANG='):
+                        user_lang = line.split('=')[1].strip('"')
+                        if user_lang and not user_lang.startswith('en'):
+                            current_lang = user_lang
+                        break
+            except Exception:
+                pass
+
     # Set LANGUAGE environment variable for gettext
     if current_lang:
         lang_code = current_lang.split('.')[0]  # tr_TR.UTF-8 -> tr_TR
         os.environ['LANGUAGE'] = lang_code
-    
+
     locale.setlocale(locale.LC_ALL, '')
-except:
+except Exception:
     pass
 
 gettext.bindtextdomain('pisiman', locale_dir)
@@ -113,6 +131,16 @@ class TerminalFallback(QPlainTextEdit):
         self.process = QProcess(self)
         self.process.readyReadStandardOutput.connect(self.read_stdout)
         self.process.readyReadStandardError.connect(self.read_stderr)
+        self.process.finished.connect(self._shell_finished)
+        self._ensure_shell()
+
+    def _ensure_shell(self):
+        if self.process.state() == QProcess.ProcessState.NotRunning:
+            self.process.start("bash", ["--norc", "--noprofile", "-i"])
+
+    def _shell_finished(self):
+        self.append_text("\n[shell kapandı, yeniden başlatılıyor...]\n")
+        self._ensure_shell()
 
     def read_stdout(self):
         data = self.process.readAllStandardOutput().data().decode('utf-8', errors='ignore')
@@ -128,11 +156,11 @@ class TerminalFallback(QPlainTextEdit):
         self.moveCursor(QTextCursor.MoveOperation.End)
 
     def sendText(self, text):
-        if text.endswith('\n'):
-            cmd = text.strip()
-            # If a process is already running, we might need a better way, 
-            # but for one-shot commands this is fine.
-            self.process.start("sh", ["-c", cmd])
+        if not text.endswith('\n'):
+            text += '\n'
+        self._ensure_shell()
+        self.append_text("$ %s" % text.strip())
+        self.process.write(text.encode('utf-8', errors='ignore'))
 
     def setHistorySize(self, size): pass
     def setScrollBarPosition(self, pos): pass
@@ -192,7 +220,10 @@ class MainWindow(QMainWindow):
         self.actionUpdateRepo.triggered.connect(self.slotUpdateRepo)
         self.actionLanguages.triggered.connect(self.slotSelectLanguages)
         self.actionPackages.triggered.connect(self.slotSelectPackages)
-        self.actionMakeImage.triggered.connect(self.slotMakeImage)
+        # NOT: Tek satir olmali. Burada ikinci bir connect() varsa
+        # "Imaj Olustur" tiklamasi terminale IKI adet "pisiman.py make"
+        # yazar; ikincisi birincinin bitmesini bekleyip imaji bastan
+        # kurar (flock da ise yaramaz, cunku es zamanli degil, ardisik).
         self.actionMakeImage.triggered.connect(self.slotMakeImage)
 
         self.actionMake_Repo.triggered.connect(self.slotMakeRepo)
@@ -228,14 +259,99 @@ class MainWindow(QMainWindow):
             self.slotClickedCollection)
 
         self.menuCommands.hovered[QAction].connect(self.updateCommands)
+
+        # Dil secimi menusu (Dil / Language)
+        self.setupLanguageMenu()
+
+        # System settings tab (data/etc release dosyaları)
+        self.releaseSave.clicked.connect(self.slotReleaseSave)
+
         # Initialize
         self.initialize()
 
         self.updateCommands()
+        self.releaseFilesLoad()
 
     def initialize(self):
         if len(self.args) == 2:
             self.slotOpen(self.args[1])
+
+    # ------------------------------------------------------------------
+    # Dil secimi
+    # ------------------------------------------------------------------
+    def setupLanguageMenu(self):
+        """MenuBar'a 'Dil / Language' menusu ekler.
+
+        Secenekler locale/ altindaki cevirilerden uretilir. Secim
+        ~/.config/pisiman/pisiman.conf dosyasina yazilir; yeni dilin
+        tum arayuze uygulanmasi icin program yeniden baslatilir.
+        """
+        from app.gui import settings as gui_settings
+
+        self.menuLanguage = QMenu(_("Language"), self)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+
+        saved = gui_settings.get_saved_language()
+
+        # Sistem dili (otomatik algila)
+        system_action = QAction(_("System default"), self)
+        system_action.setCheckable(True)
+        system_action.setChecked(not saved)
+        system_action.triggered.connect(
+            lambda checked=False: self.changeLanguage(None))
+        group.addAction(system_action)
+        self.menuLanguage.addAction(system_action)
+
+        self.menuLanguage.addSeparator()
+
+        for code, name in gui_settings.available_languages():
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setChecked(saved == code)
+            action.setData(code)
+            action.triggered.connect(
+                lambda checked=False, c=code: self.changeLanguage(c))
+            group.addAction(action)
+            self.menuLanguage.addAction(action)
+
+        self.menubar.addMenu(self.menuLanguage)
+
+    def changeLanguage(self, code):
+        """Dili kaydeder ve yeniden baslatmayi onerir.
+
+        code None ise sistem dili kullanilir.
+        """
+        from app.gui import settings as gui_settings
+
+        if gui_settings.get_saved_language() == code:
+            return
+        gui_settings.set_saved_language(code)
+
+        box = QMessageBox(self)
+        box.setWindowTitle(self.title)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(_("Interface language changed."))
+        box.setInformativeText(
+            _("The new language is fully applied after restarting the "
+              "program.\n\nRestart now?\n\n(Note: a build running in the "
+              "terminal will be interrupted.)"))
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if box.exec() == QMessageBox.StandardButton.Yes:
+            self.restartApplication()
+
+    def restartApplication(self):
+        """Uygulamayi ayni argumanlarla yeniden baslatir."""
+        program = sys.executable or "python3"
+        argv = [program] + list(sys.argv)
+        try:
+            os.execv(program, argv)
+        except OSError as error:
+            QMessageBox.warning(
+                self, self.title,
+                _("Could not restart the program:\n%s") % error)
 
     def initializeRepo(self):
         if not self.repo:
@@ -258,7 +374,7 @@ class MainWindow(QMainWindow):
         if not filename:
             filename = QFileDialog.getOpenFileName(
                 self, _("Select project file"), os.path.join(os.getcwd(), "project-files"),
-                "Xml Files (*.xml)")
+                "Xml Files (*.xml)", options=QFileDialog.Option.DontUseNativeDialog)
             filename = filename[0]
         if filename:
             self.project = Project()
@@ -291,7 +407,7 @@ class MainWindow(QMainWindow):
             "Save As..." menu item fires this function.
         """
         filename = QFileDialog.getSaveFileName(
-            self, _("Save project"), os.path.join(os.getcwd(), "project-files"), "Xml Files (*.xml)")
+            self, _("Save project"), os.path.join(os.getcwd(), "project-files"), "Xml Files (*.xml)", options=QFileDialog.Option.DontUseNativeDialog)
         filename = filename[0]
         if filename:
             self.project.filename = str(filename)
@@ -323,7 +439,7 @@ class MainWindow(QMainWindow):
         _dir = self.get_path(self.le_iso_output_dir.text())
 
         new_dir = QFileDialog.getExistingDirectory(
-            self, _("Select Iso Output Dir"), _dir)
+            self, _("Select Iso Output Dir"), _dir, options=QFileDialog.Option.DontUseNativeDialog)
 
         if new_dir:
             self.le_iso_output_dir.setText(new_dir)
@@ -337,7 +453,7 @@ class MainWindow(QMainWindow):
 
         filename = QFileDialog.getOpenFileName(
             self, _("Select repository index"), _dir,
-            "Pisi Index Files(*-index.xml *-index.xml.xz)")
+            "Pisi Index Files(*-index.xml *-index.xml.xz)", options=QFileDialog.Option.DontUseNativeDialog)
         filename = filename[0]
         if filename:
             filename = str(filename)
@@ -352,7 +468,7 @@ class MainWindow(QMainWindow):
         _dir = self.get_path(self.linePluginPackage.text())
 
         filename = QFileDialog.getOpenFileName(
-            self, _("Select plugin package"), _dir, "Pisi Files(*.pisi)")
+            self, _("Select plugin package"), _dir, "Pisi Files(*.pisi)", options=QFileDialog.Option.DontUseNativeDialog)
         filename = filename[0]
         if filename:
             self.linePluginPackage.setText(filename)
@@ -363,7 +479,7 @@ class MainWindow(QMainWindow):
         """
         _dir = self.get_path(self.lineReleaseFiles.text())
 
-        directory = QFileDialog.getExistingDirectory(self, "", _dir)
+        directory = QFileDialog.getExistingDirectory(self, "", _dir, options=QFileDialog.Option.DontUseNativeDialog)
         if directory:
             self.lineReleaseFiles.setText(directory)
 
@@ -373,7 +489,7 @@ class MainWindow(QMainWindow):
         """
         _dir = self.get_path(self.lineWorkFolder.text())
 
-        directory = QFileDialog.getExistingDirectory(self, "", _dir)
+        directory = QFileDialog.getExistingDirectory(self, "", _dir, options=QFileDialog.Option.DontUseNativeDialog)
         if directory:
             self.lineWorkFolder.setText(directory)
 
@@ -501,10 +617,28 @@ class MainWindow(QMainWindow):
         self.actionPack_Live.setEnabled(state >= 1)
         self.actionMake_Iso.setEnabled(state >= 2)
 
+    # Ayni komutun cok kisa sure icinde tekrar gonderilmesini engeller.
+    # Cift tiklama ya da yinelenen sinyal baglantisi, terminale iki
+    # "pisiman.py make ..." yazar; ikincisi birincinin bitmesini bekleyip
+    # imaji bastan kurar (40+ dakika bosuna). Bu koruma yinelenen
+    # komutu yok sayar.
+    _COMMAND_DEBOUNCE = 5.0
+
+    def _allow_command(self, cmd):
+        now = time.time()
+        last_cmd, last_time = getattr(self, "_last_command", (None, 0.0))
+        if last_cmd == cmd and (now - last_time) < self._COMMAND_DEBOUNCE:
+            print("[%s az once baslatildi; yinelenen komut yok sayildi]" % cmd)
+            return False
+        self._last_command = (cmd, now)
+        return True
+
     def slotMakeImage(self):
         """
             Make image button fires this function.
         """
+        if not self._allow_command("make"):
+            return
         self.tabWidget.setCurrentIndex(2)
         if os.path.exists(os.path.join(self.project.work_dir, "finished.txt")):
             os.remove(os.path.join(self.project.work_dir, "finished.txt"))
@@ -534,6 +668,8 @@ class MainWindow(QMainWindow):
         """
             Make image button fires this function.
         """
+        if not self._allow_command("make-repo"):
+            return
         self.tabWidget.setCurrentIndex(2)
         if not self.repo:
             if not self.checkProject():
@@ -583,6 +719,8 @@ class MainWindow(QMainWindow):
         self.updateCommands()
 
     def slotMakeLive(self):
+        if not self._allow_command("make-live"):
+            return
         self.tabWidget.setCurrentIndex(2)
         """
             Make image button fires this function.
@@ -612,6 +750,8 @@ class MainWindow(QMainWindow):
         """
             Make image button fires this function.
         """
+        if not self._allow_command("pack-live"):
+            return
         self.tabWidget.setCurrentIndex(2)
         if not self.repo:
             if not self.checkProject():
@@ -638,6 +778,8 @@ class MainWindow(QMainWindow):
         """
             Make image button fires this function.
         """
+        if not self._allow_command("make-iso"):
+            return
         self.tabWidget.setCurrentIndex(2)
         if not self.repo:
             if not self.checkProject():
@@ -706,6 +848,45 @@ class MainWindow(QMainWindow):
             self.updateCollection()
         else:
             self.listPackageCollection.clear()
+
+    def releaseFilesLoad(self):
+        """
+            data/etc altındaki lsb-release, os-release ve pisilinux-release
+            dosyalarını okuyup Sistem Ayarları sekmesindeki alanlara yazar.
+        """
+        files = {
+            "lsb-release": self.lineLsbReleaseEdit,
+            "os-release": self.lineOsReleaseEdit,
+            "pisilinux-release": self.linePisilinuxRelease,
+        }
+        for name, widget in files.items():
+            path = os.path.join(DATA_DIR, "etc", name)
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        widget.setPlainText(f.read())
+                else:
+                    widget.setPlainText("Dosya bulunamadı: %s" % path)
+            except Exception as e:
+                widget.setPlainText("Hata: " + str(e))
+
+    def slotReleaseSave(self):
+        """
+            Sistem Ayarları sekmesindeki release dosyalarını data/etc altına kaydeder.
+        """
+        files = {
+            "lsb-release": self.lineLsbReleaseEdit.toPlainText(),
+            "os-release": self.lineOsReleaseEdit.toPlainText(),
+            "pisilinux-release": self.linePisilinuxRelease.toPlainText(),
+        }
+        try:
+            for name, content in files.items():
+                path = os.path.join(DATA_DIR, "etc", name)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            QMessageBox.information(self, "Başarılı", "Release dosyaları başarıyla kaydedildi.")
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", "Dosyalar kaydedilemedi: " + str(e))
 
     def loadProject(self):
         """
@@ -836,22 +1017,23 @@ class MainWindow(QMainWindow):
                 self.progress, update_repo=update_repo)
         except ExIndexBogus as e:
             # print(e.args[0])
-            self.progress.finished()
             QMessageBox.warning(self, self.title, _("Unable to load package \
                 index. URL is wrong, or file is corrupt."))
             return False
         except ExPackageCycle as e:
-            self.progress.finished()
             cycle = " > ".join(e.args[0])
             QMessageBox.warning(self, self.title, _("Package index has errors.\
                  Cyclic dependency found:\n  %s.") % cycle)
             return False
         except ExPackageMissing as e:
-            self.progress.finished()
             QMessageBox.warning(self, self.title, _("Package index has errors.\
             '%s' depends on non-existing '%s'.") % e.args)
             return False
-        else:
+        except Exception as e:
+            QMessageBox.warning(self, self.title, _("Unexpected error while fetching repository:\n%s") % e)
+            return False
+        finally:
+            # Pencere her durumda kapanır (hata/farklı istisna dahil)
             self.progress.finished()
 
         missing_components, missing_packages = self.project.get_missing()
@@ -871,7 +1053,5 @@ class MainWindow(QMainWindow):
                 if package in self.project.selected_packages:
                     self.project.selected_packages.remove(package)
             return self.updateRepo(update_repo=False)
-
-        self.progress.finished()
 
         return True

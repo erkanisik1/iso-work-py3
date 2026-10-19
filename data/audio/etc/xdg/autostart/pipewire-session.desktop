@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PipeWire Session
+Comment=PipeWire + WirePlumber oturum yoneticisini baslatir (systemd'siz sistem)
+Exec=/usr/bin/pipewire-session start
+NoDisplay=true
+Terminal=false
+X-KDE-autostart-phase=1
+X-GNOME-Autostart-Phase=Initialization

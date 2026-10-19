@@ -1,0 +1,10 @@
+#!/bin/bash
+
+export XDG_DESKTOP_DIR="$(xdg-user-dir DESKTOP)"
+export XDG_DOCUMENTS_DIR="$(xdg-user-dir DOCUMENTS)"
+export XDG_DOWNLOAD_DIR="$(xdg-user-dir DOWNLOAD)"
+export XDG_MUSIC_DIR="$(xdg-user-dir MUSIC)"
+export XDG_PICTURES_DIR="$(xdg-user-dir PICTURES)"
+export XDG_VIDEOS_DIR="$(xdg-user-dir VIDEOS)"
+export XDG_PUBLICSHARE_DIR="$(xdg-user-dir PUBLICSHARE)"
+export XDG_TEMPLATES_DIR="$(xdg-user-dir TEMPLATES)"

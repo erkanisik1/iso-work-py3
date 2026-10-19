@@ -112,3 +112,97 @@ msgstr "İmaj oluşturuluyor..."
 
 msgid "Making ISO..."
 msgstr "ISO oluşturuluyor..."
+
+# file dialogs / warnings
+msgid "Check repo before download.\nIf the repo is checked, there are no lost packages."
+msgstr "Önce depoyu kontrol edin.\nDepo kontrol edildiyse kayıp paket yoktur."
+
+# file dialogs / warnings
+msgid "Image title is missing."
+msgstr "İmaj başlığı eksik."
+
+# file dialogs / warnings
+msgid "Installation Languages is not selected."
+msgstr "Kurulum dilleri seçilmedi."
+
+# file dialogs / warnings
+msgid "Package index has errors.                 Cyclic dependency found:\n  %s."
+msgstr "Paket dizininde hata var. Döngüsel bağımlılık bulundu:\n  %s."
+
+# file dialogs / warnings
+msgid "Package index has errors.            '%s' depends on non-existing '%s'."
+msgstr "Paket dizininde hata var. '%s', mevcut olmayan '%s' paketine bağımlı."
+
+# file dialogs / warnings
+msgid "Packages removed that has wrong hash.\nRerun 'Make Inage (Ctrl+R)'."
+msgstr "Bozuk paketler kaldırıldı.\n'Make Image (Ctrl+R)' işlemini tekrar çalıştırın."
+
+# file dialogs / warnings
+msgid "Project file is corrupt."
+msgstr "Proje dosyası bozuk."
+
+# file dialogs / warnings
+msgid "Project file is missing."
+msgstr "Proje dosyası eksik."
+
+# file dialogs / warnings
+msgid "Repository URL is missing."
+msgstr "Depo adresi eksik."
+
+# file dialogs / warnings
+msgid "Save project"
+msgstr "Projeyi kaydet"
+
+# file dialogs / warnings
+msgid "Select Iso Output Dir"
+msgstr "ISO çıktı dizinini seçin"
+
+# file dialogs / warnings
+msgid "Select plugin package"
+msgstr "Eklenti paketini seçin"
+
+# file dialogs / warnings
+msgid "Select project file"
+msgstr "Proje dosyasını seçin"
+
+# file dialogs / warnings
+msgid "Select repository index"
+msgstr "Depo dizinini seçin"
+
+# file dialogs / warnings
+msgid "Unable to load package                 index. URL is wrong, or file is corrupt."
+msgstr "Paket dizini yüklenemedi. Adres yanlış ya da dosya bozuk."
+
+# file dialogs / warnings
+msgid "Work folder is missing."
+msgstr "Çalışma klasörü eksik."
+
+# repo fetch fallback
+msgid "Unexpected error while fetching repository:\n%s"
+msgstr "Depo alınırken beklenmeyen hata:\n%s"
+
+# dil secimi menusu
+msgid "Language"
+msgstr "Dil"
+
+msgid "System default"
+msgstr "Sistem dili"
+
+msgid "Interface language changed."
+msgstr "Arayüz dili değiştirildi."
+
+msgid ""
+"The new language is fully applied after restarting the program.\n"
+"\n"
+"Restart now?\n"
+"\n"
+"(Note: a build running in the terminal will be interrupted.)"
+msgstr ""
+"Yeni dil, program yeniden başlatıldıktan sonra tamamen uygulanır.\n"
+"\n"
+"Şimdi yeniden başlatılsın mı?\n"
+"\n"
+"(Not: terminalde süren bir derleme varsa iptal olur.)"
+
+msgid "Could not restart the program:\n%s"
+msgstr "Program yeniden başlatılamadı:\n%s"

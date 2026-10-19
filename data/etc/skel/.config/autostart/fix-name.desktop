@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Fix Desktop Name
+Exec=/usr/local/bin/pisi-desktop-fix.sh
+Terminal=false
+NoDisplay=true
+X-KDE-autostart-phase=1

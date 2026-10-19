@@ -111,9 +111,7 @@ class BaseSystem:
     def __init__(self):
         self.kver = config["kernelVersion"]
         self.tmpDir = config["tmpDir"]
-        self.baseDirs = [
-            "bin", "sbin", "etc/initramfs.d", "dev", "dev/loop",
-            "dev/lock/subsys", "lib", "newroot", "proc", "sys"]
+        self.baseDirs = ["bin", "sbin", "etc/initramfs.d", "dev", "dev/loop", "lib", "newroot", "proc", "sys", "tmp", "etc/udev", "etc/udev/rules.d", "lib/udev", "lib/udev/rules.d", "run/udev", "mnt/usb"]
 
         self.deviceNodes = {"null"      : ["c", 1, 3],
                             "console"   : ["c", 5, 1],
@@ -136,7 +134,7 @@ class BaseSystem:
                                  "/lib/initramfs/udhcpc.script" : "/etc/",
                                  "/lib/initramfs/profile.rc"    : "/etc/profile",
 
-                                 "/sbin/udevd"                  : "/bin/", #bu iki satır gereklimi tam bilimyorum denemek lazım
+                                 "/sbin/udevd"                  : "/bin/",
                                  "/sbin/mdadm"                  : "/bin/",
                             }
 
@@ -254,9 +252,14 @@ class KernelModule:
 
         self.firewireModules = ["firewire-ohci", "firewire-sbp2", "firewire-net", "firewire-core"]
         self.i2oModules = ["i2o_block"]
-        self.usbModules = ["usb-storage", "sd_mod", "usbcore", "ehci-hcd", "ohci-hcd", "uhci-hcd", "usbhid", "xhci_hcd", "xhci_pci"]
+        self.usbModules = ["usb-storage", "sd_mod", "usbcore", "ehci-hcd", "ohci-hcd", "uhci-hcd", "usbhid", "xhci_hcd", "xhci_pci xhci-pci-renesas dm-mod"]
 
-        self.filesystemModules = ["ext2", "ext3", "ext4", "reiser4", "jfs", "reiserfs", "xfs", "vfat", "fat", "ntfs", "unionfs", "cramfs", "nfs", "nls_utf8", "nls_iso8859_9", "nls_cp857", "nls_iso8859-1", "nls_ascii", "nls_cp850", "squashfs", "aufs", "udf", "isofs", "overlay", "exfat"]
+        self.filesystemModules = [
+            "ext2", "ext3", "ext4", "reiser4", "jfs", "reiserfs", "xfs", "vfat", "fat", 
+            "ntfs", "ntfs3", "unionfs", "cramfs", "nfs", "nls_utf8", "nls_iso8859_9", 
+            "nls_cp857", "nls_iso8859-1", "nls_ascii", "nls_cp850", "squashfs", "aufs", 
+            "udf", "isofs", "overlay", "aufs", "exfat", "efivarfs"
+        ]
 
         self.networkBaseModules = ["af_packet", "mii", "8390", "via-rhine", "8139too", "ne2k-pci", "e100", "sky2", "tg3", "skge"]
         self.networkDirs = ["kernel/drivers/net"]
@@ -479,6 +482,119 @@ class Plymouth:
 
         self.install_current_theme()
 
+class Udev:
+    def __init__(self):
+        self.targetDir = config["tmpDir"]
+        self.udevRules = [
+            "50-udev-default.rules",
+            "60-persistent-storage.rules",
+            "64-btrfs.rules",
+            "80-drivers.rules"
+        ]
+        self.udevTools = [
+            "ata_id",
+            "scsi_id"
+        ]
+
+    def install(self):
+        """Will install udev related base stuff."""
+        # Udev yapılandırma dosyası
+        if os.path.exists("/etc/udev/udev.conf"):
+            copy("/etc/udev/udev.conf", os.path.join(self.targetDir, "etc/udev/udev.conf"))
+
+        # Udev binary'leri
+        if os.path.exists("/sbin/udevd"):
+            copy("/sbin/udevd", os.path.join(self.targetDir, "sbin/udevd"))
+        if os.path.exists("/bin/udevadm"):
+            copy("/bin/udevadm", os.path.join(self.targetDir, "bin/udevadm"))
+
+        # Udev kuralları
+        for rule in self.udevRules:
+            src = "/lib/udev/rules.d/%s" % rule
+            if os.path.exists(src):
+                dest_dir = os.path.join(self.targetDir, "lib/udev/rules.d")
+                if not os.path.exists(dest_dir):
+                    mkdir(dest_dir)
+                copy(src, os.path.join(dest_dir, rule))
+
+        # Udev araçları
+        for tool in self.udevTools:
+            src = "/lib/udev/%s" % tool
+            if os.path.exists(src):
+                dest_dir = os.path.join(self.targetDir, "lib/udev")
+                if not os.path.exists(dest_dir):
+                    mkdir(dest_dir)
+                copy(src, os.path.join(dest_dir, tool))
+
+class Mdadm:
+    def __init__(self):
+        self.targetDir = config["tmpDir"]
+        self.rootDir = config["rootDir"]
+
+    def install(self):
+        """Will install mdadm related RAID stuff."""
+        # Mdadm binary'si
+        if os.path.exists("/sbin/mdadm"):
+            copy("/sbin/mdadm", os.path.join(self.targetDir, "sbin/mdadm"))
+
+        # Mdadm modülleri (dm-*, drivers/md/*)
+        self._add_raid_modules()
+
+        # Udev kuralları
+        self._add_udev_rules()
+
+        # Özel mdadm.conf varsa ekle
+        self._add_custom_config()
+
+    def _add_raid_modules(self):
+        """RAID modüllerini ekle"""
+        modulesDir = os.path.join(self.rootDir, "lib/modules/%s" % config["kernelVersion"])
+
+        # dm-* modülleri
+        for module in glob.glob("%s/kernel/drivers/md/dm-*.ko" % modulesDir):
+            if os.path.exists(module):
+                copy(module, os.path.join(self.targetDir, module.replace(self.rootDir, "/").lstrip("/")))
+
+        # drivers/md/* altındaki tüm modüller
+        mdDir = os.path.join(modulesDir, "kernel/drivers/md")
+        if os.path.exists(mdDir):
+            for root, dirs, files in os.walk(mdDir):
+                for name in files:
+                    if name.endswith(".ko"):
+                        src = os.path.join(root, name)
+                        copy(src, os.path.join(self.targetDir, src.replace(self.rootDir, "/").lstrip("/")))
+
+    def _add_udev_rules(self):
+        """RAID için udev kurallarını ekle"""
+        rules = [
+            "/lib/udev/rules.d/63-md-raid-arrays.rules",
+            "/lib/udev/rules.d/64-md-raid-assembly.rules",
+
+            "/lib/udev/rules.d/10-dm.rules",
+            "/lib/udev/rules.d/11-dm-initramfs.rules",
+            "/lib/udev/rules.d/11-dm-lvm.rules",
+            "/lib/udev/rules.d/13-dm-disk.rules",
+            "/lib/udev/rules.d/95-dm-notify.rules"
+        ]
+
+        for rule in rules:
+            if os.path.exists(rule):
+                dest_dir = os.path.join(self.targetDir, "lib/udev/rules.d")
+                if not os.path.exists(dest_dir):
+                    mkdir(dest_dir)
+                copy(rule, os.path.join(dest_dir, os.path.basename(rule)))
+
+    def _add_custom_config(self):
+        """Özel mdadm.conf dosyasını kontrol et ve ekle"""
+        customConf = os.path.join(self.rootDir, "etc/mdadm.conf")
+        if os.path.exists(customConf):
+            # ARRAY satırı var mı kontrol et
+            with open(customConf, "r") as f:
+                content = f.read()
+                if "ARRAY" in content:
+                    # print "Custom /etc/mdadm.conf file will be used in initramfs for assembling arrays."
+                    copy(customConf, os.path.join(self.targetDir, "etc/mdadm.conf"))
+
 class Initramfs:
     def __init__(self):
         self.destDir = config["destDir"]
@@ -588,6 +704,14 @@ if __name__ == "__main__":
     # Check for plymouth and install if found
     plymouth = Plymouth()
     plymouth.install()
+
+    # UDEV EKLENTİSİ - YENİ
+    udev = Udev()
+    udev.install()
+
+    # MDADM EKLENTİSİ - YENİ
+    mdadm = Mdadm()
+    mdadm.install()
 
     kernelmodule = KernelModule()
     kernelmodule.autoGenerate()

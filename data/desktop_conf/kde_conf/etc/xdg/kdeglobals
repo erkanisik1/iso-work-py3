@@ -1,0 +1,12 @@
+[General]
+shadeSortColumn=true
+
+[Icons]
+Theme=kora
+
+[KDE]
+ChangeCursor=true
+LookAndFeelPackage=maia-light
+contrast=4
+widgetStyle=Breeze
+SingleClick=true

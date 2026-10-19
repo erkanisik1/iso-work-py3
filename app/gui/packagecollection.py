@@ -118,7 +118,7 @@ class PackageCollectionDialog(QDialog):
     def slotSelectIcon(self):
         iconPath = QFileDialog.getOpenFileName(self, _("Select Collection Icon"),
                                                os.path.join(os.getcwd(), "icons"),
-                                               "*.png")[0]
+                                               "*.png", options=QFileDialog.Option.DontUseNativeDialog)[0]
         
         if iconPath:
             if self.tmpCollection:

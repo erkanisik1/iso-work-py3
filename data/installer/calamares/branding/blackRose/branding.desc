@@ -1,0 +1,46 @@
+componentName:  blackRose
+welcomeExpandingLogo:   true
+windowExpanding:    normal
+windowSize: 800px,520px
+windowPlacement: center
+sidebar: widget
+navigation: widget
+
+
+strings:
+    productName:         "Pisi GNU/Linux"
+    shortProductName:    Pisilinux
+    version:             2.4.4 Karagül (Black Rose)
+    shortVersion:        2.4.4
+    versionedName:       Pisilinux 2.4.4 "Karagül (Black Rose)"
+    shortVersionedName:  Pisilinux 2.4.4
+    bootloaderEntryName: Pisilinux
+    productUrl:          https://pisilinux.org
+    supportUrl:          https://pisilinux.org/forum
+    knownIssuesUrl:      https://github.com/pisilinux/main/issues
+    releaseNotesUrl:     /usr/share/calamares/media-content/index.html
+
+
+images:
+    #productBanner:       "banner.png"
+    productIcon:         "logo.png"
+    productLogo:         "logo.png"
+    # productWallpaper:    "wallpaper.png"
+    productWelcome:      "languages.png"
+
+
+style:
+   SidebarBackground:        "#292F34"
+   SidebarText:              "#FFFFFF"
+   SidebarTextCurrent:       "#292F34"
+   SidebarBackgroundCurrent: "#3DAEE9"
+  
+
+slideshow:               "show.qml"
+
+slideshowAPI: 2
+
+uploadServer :
+    type :    "fiche"
+    url :     "http://termbin.com:9999"
+    sizeLimit : -1

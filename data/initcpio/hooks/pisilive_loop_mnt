@@ -1,0 +1,48 @@
+run_hook() {
+    # Kernel komut satırını tara
+    for cmd in $(cat /proc/cmdline); do
+        case ${cmd} in
+            img_dev=*)  img_dev="${cmd#*=}" ;;
+            img_loop=*) img_loop="${cmd#*=}" ;;
+        esac
+    done
+
+    # Eğer Ventoy üzerinden boot ediliyorsa
+    if [ -n "${img_dev}" ] && [ -n "${img_loop}" ]; then
+        echo "::: Ventoy Algilandi! ISO yukleniyor... :::"
+        
+        mkdir -p /run/archiso/img_dev
+        
+        # Ventoy USB diskini bagla (UUID, Label veya direkt /dev/X olarak gelebilir)
+        # Genellikle /dev/disk/by-uuid/ veya direkt gelen degiskenle mount edilir
+        if [ -b "${img_dev}" ]; then
+            mount -o ro "${img_dev}" /run/archiso/img_dev
+        else
+            # Eger block device degilse by-uuid veya by-label denemesi yapilir
+            mount -o ro "/dev/disk/by-uuid/${img_dev}" /run/archiso/img_dev 2>/dev/null || \
+            mount -o ro "${img_dev}" /run/archiso/img_dev
+        fi
+
+        # ISO'yu miso hook'unun beklediği /bootmnt noktasina loopback olarak bagla
+        mkdir -p /bootmnt
+        # Önce Ventoy'un zaten bağladığı loop device varsa onu kullan
+        for loop_dev in /dev/loop[0-9]*; do
+            if [ -b "${loop_dev}" ]; then
+                if mount -o ro "${loop_dev}" /bootmnt 2>/dev/null; then
+                    if [ -f "/bootmnt/.miso" ]; then
+                        echo "::: Ventoy loop device'dan baglanti yapildi: ${loop_dev} :::"
+                        export pisi_live_loop_mounted=1
+                        return 0
+                    fi
+                    umount /bootmnt 2>/dev/null
+                fi
+            fi
+        done
+        if mount -o ro,loop "/run/archiso/img_dev/${img_loop}" /bootmnt; then
+            echo "::: ISO basariyla loopback olarak baglandi. :::"
+            export pisi_live_loop_mounted=1
+        else
+            echo "ERROR: ISO loopback olarak baglanamadi!"
+        fi
+    fi
+}

@@ -1,0 +1,17 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=Firefox
+GenericName=Web Browser
+GenericName[tr]=Web Tarayıcı
+Comment=Browse the Web
+Comment[tr]=İnternette gezintiye çıkın
+Exec=/usr/lib/firefox/firefox %u
+Icon=firefox
+Terminal=false
+Type=Application
+StartupNotify=true
+StartupWMClass=firefox
+DBusActivatable=false
+MimeType=text/html;text/xml;application/xhtml+xml;application/vnd.mozilla.xul+xml;text/mml;application/x-xpinstall;
+Categories=Application;Network;GNOME;GTK;WebBrowser;
+X-XFCE-Source=file:///usr/share/applications/firefox.desktop

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Pisi Software Center
+Name[tr]=Pisi Yazılım Merkezi
+GenericName=Add or Remove Software
+Comment=PiSi Package Manager Graphical User Interface
+Comment[tr]=PiSi Paket Yöneticisi Grafik Kullanıcı Arayüzü
+Icon=pisi-software-center
+Type=Application
+Exec=pisi-software-center
+Categories=System;PisiTools

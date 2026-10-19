@@ -1,0 +1,18 @@
+#!/bin/sh
+exec tail -n +3 $0
+# This file provides an easy way to add custom menu entries.  Simply type the
+# menu entries you want to add after this comment.  Be careful not to change
+# the 'exec tail' line above.
+
+# Görsel gösterebilmek için gerekli GRUB modüllerini yükleyelim
+insmod png
+insmod jpeg
+insmod ext2
+
+if [ "${gfxmode}" = "1920x1080" ]; then
+    background_image /boot/grub/wallpapers/bg_1920x1080.png
+elif [ "${gfxmode}" = "1024x768" ]; then
+    background_image /boot/grub/wallpapers/bg_1024x768.png
+else
+    background_image /boot/grub/wallpapers/default.png
+fi

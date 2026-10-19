@@ -1,0 +1,237 @@
+#!/bin/sh
+# PipeWire oturum yoneticisi
+# systemd'siz sistemler (Pisi Linux + SysVinit + elogind) icin.
+#
+#   pipewire-session [start|stop|restart|status]
+#
+# Onemli iki kural:
+#  1) Saglik kontrolu icin *sureci* degil *soketi* denetleriz. Onceki
+#     oturumdan kalmis, soketi silinmis bir pipewire yeni oturumun
+#     soketini acmaz; surec var sanilip atlanir ve wireplumber
+#     "Failed to connect to PipeWire" ile olur.
+#  2) Sistemde SADECE BIR ses sunucusu olmalidir. Gercek pulseaudio
+#     yaninda pipewire calisirsa ikisi de org.bluez'e A2DP/HFP
+#     profilleri kaydetmeye calisir; BlueZ birine NotPermitted doner
+#     ve Bluetooth cihazi WirePlumber'da hic enumerate edilmez ->
+#     ses ayarlarinda BT hoparlor kaybolur.
+
+set -u
+
+UID_NOW=$(id -u)
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_NOW}"
+LOG="$XDG_RUNTIME_DIR/pipewire-session.log"
+
+PW_SOCK="$XDG_RUNTIME_DIR/pipewire-0"
+PULSE_SOCK="$XDG_RUNTIME_DIR/pulse/native"
+
+log() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$LOG" 2>/dev/null; }
+
+# --- saglik kontrolleri --------------------------------------------------
+
+# PipeWire gercekten cevap veriyor mu? (yalnizca soket var olmasi yeterli degil)
+pw_alive()     { [ -S "$PW_SOCK" ]    && pw-cli info >/dev/null 2>&1; }
+
+# Pulse uyumluluk sunucusu cevap veriyor mu?
+pulse_alive()  { [ -S "$PULSE_SOCK" ] && pactl  info >/dev/null 2>&1; }
+
+# Soketin ARKASINDAKINI kim anlattir: pipewire-pulse mi, gercek pulseaudio mu?
+# pipewire-pulse "PulseAudio (on PipeWire X.Y.Z)" der; gercek PA bunu
+# "PulseAudio Ucuz ..." gibi kendi surumuyle bildirir. Sadece "pactl info
+# basarili" demek yeterli degil: gercek PA da ayni sokete yanit verir ve
+# biz pipewire-pulse hazir saniriz.
+pulse_is_pipewire() { pactl info 2>/dev/null | grep -q 'on PipeWire'; }
+
+# Gercek pulseaudio (pipewire-pulse degil) calisiyor mu?
+pa_running() { pgrep -u "$UID_NOW" -x pulseaudio >/dev/null 2>&1; }
+
+# autospawn= yes ise, sunucu yokken libpulse istemcisi (orn. plasmashell)
+# kendisi "pulseaudio --start" cagirip geri getirir. Tek ses sunucusu
+# kuralini bozan asil neden buydu.
+autospawn_state() {
+    _v=$(grep -ihE '^[[:space:]]*autospawn' /etc/pulse/client.conf "$HOME/.config/pulse/client.conf" 2>/dev/null \
+         | grep -v '^[[:space:]]*[;#]' | tail -1)
+    case "$_v" in
+        *no*)  echo "kapali" ;;
+        *yes*) echo "ACIK - PA geri gelebilir" ;;
+        *)     echo "belirsiz" ;;
+    esac
+}
+
+# --- islemler ------------------------------------------------------------
+
+# Gercek pulseaudio'yu durdur. SIRA ONEMLI: once oldur, SONRA soketi sil.
+# Aksi halde pulseaudio kapanirken bayat /pulse/native dosyasini geride
+# birakir ve pipewire-pulse "Adres zaten kullanımda" ile acamaz.
+kill_pulseaudio() {
+    pa_running || return 0
+    log "gercek pulseaudio calisiyor -> durduruluyor (bluez profili cakismasi)"
+    pkill -u "$UID_NOW" -x pulseaudio 2>/dev/null
+    _i=0
+    while pa_running && [ "$_i" -lt 30 ]; do
+        sleep 0.1; _i=$((_i + 1))
+    done
+    pa_running && pkill -9 -u "$UID_NOW" -x pulseaudio 2>/dev/null
+    _i=0
+    while pa_running && [ "$_i" -lt 20 ]; do
+        sleep 0.1; _i=$((_i + 1))
+    done
+    sleep 0.3
+    return 0
+}
+
+kill_daemons() {
+    for _p in pipewire-pulse wireplumber pipewire; do
+        if pgrep -u "$UID_NOW" -x "$_p" >/dev/null 2>&1; then
+            log "durduruluyor: $_p (pidler: $(pgrep -u "$UID_NOW" -x "$_p" | tr '\n' ' '))"
+            pkill -u "$UID_NOW" -x "$_p" 2>/dev/null
+        fi
+    done
+    _i=0
+    while pgrep -u "$UID_NOW" -x pipewire >/dev/null 2>&1 && [ "$_i" -lt 20 ]; do
+        sleep 0.1; _i=$((_i + 1))
+    done
+    pkill -9 -u "$UID_NOW" -x pipewire-pulse 2>/dev/null
+    pkill -9 -u "$UID_NOW" -x wireplumber   2>/dev/null
+    pkill -9 -u "$UID_NOW" -x pipewire      2>/dev/null
+}
+
+start_one() {
+    _name=$1; shift
+    setsid "$@" >>"$LOG" 2>&1 &
+    log "baslatildi: $_name (pid $!)"
+}
+
+wait_for() {
+    _fn=$1; _limit=${2:-50}; _i=0
+    while [ "$_i" -lt "$_limit" ]; do
+        $_fn && return 0
+        sleep 0.1; _i=$((_i + 1))
+    done
+    return 1
+}
+
+start() {
+    # Ayni anda iki kopya calismasin (autostart + elle calistirma).
+    LOCK="$XDG_RUNTIME_DIR/.pipewire-session.lock"
+    if ! mkdir "$LOCK" 2>/dev/null; then
+        log "baska bir kopme calisiyor, bekleniyor"
+        _i=0
+        while [ -d "$LOCK" ] && [ "$_i" -lt 300 ]; do
+            sleep 0.1; _i=$((_i + 1))
+        done
+        pw_alive && { log "baska kopme zaten baslatti"; return 0; }
+    fi
+    trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+    log "=== baslatiliyor (XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR) ==="
+
+    # 1) Once PA'yi temizle (bluez profilleri icin)
+    kill_pulseaudio
+
+    # 2) Onceki oturumdan kalan pipewire sureclerini temizle
+    kill_daemons
+
+    # 3) Artik kimse tutmuyorsa bayat soket dosyalarini sil
+    rm -f "$PW_SOCK" "$PULSE_SOCK" 2>/dev/null
+
+    # 4) pipewire
+    start_one pipewire pipewire
+    if ! wait_for pw_alive 60; then
+        log "HATA: pipewire soketi acilmadi: $PW_SOCK"
+        log "HATA: ayrinti icin 'cat $LOG'"
+        return 1
+    fi
+    log "pipewire hazir"
+
+    # 5) wireplumber (bluez dahil oturum/politika yoneticisi)
+    start_one wireplumber wireplumber
+    _i=0
+    while [ "$_i" -lt 30 ]; do
+        pgrep -u "$UID_NOW" -x wireplumber >/dev/null 2>&1 && break
+        sleep 0.1; _i=$((_i + 1))
+    done
+    if ! pgrep -u "$UID_NOW" -x wireplumber >/dev/null 2>&1; then
+        log "HATA: wireplumber baslatilamadi (pipewire'a baglanamadi olabilir)"
+        return 1
+    fi
+    log "wireplumber hazir"
+
+    # 6) pipewire-pulse: PulseAudio istemcileri icin uyumluluk katmani
+    start_one pipewire-pulse pipewire-pulse
+    if ! wait_for pulse_alive 60; then
+        log "UYARI: pipewire-pulse acilmadi; Pulse uygulamalari sessiz kalir"
+    elif ! pulse_is_pipewire; then
+        log "UYARI: soketi gercek pulseaudio sunuyor, bluez profilleri PA'da"
+    else
+        log "pipewire-pulse hazir -> Pulse istemcileri calisir"
+    fi
+
+    # 7) MUHAFIZ: baslattiktan sonra da surec bitene PA'nin geri
+    #    gelmesini engelle. Plasma'nin ses modulu, sunucu yok
+    #    gordugu anda start-pulseaudio-x11 cagirip geri getiriyor;
+    #    o zaman Bluetooth profilleri tekrar PA'ya gcer.
+    _i=0
+    while [ "$_i" -lt 100 ]; do
+        pa_running || break
+        kill_pulseaudio
+        _i=$((_i + 1))
+    done
+
+    # 8) Ozet
+    if [ -z "$(pactl list short sinks 2>/dev/null)" ]; then
+        log "UYARI: hicbir ses cikti cihazi (sink) yok"
+    else
+        log "sink'ler:"
+        pactl list short sinks 2>/dev/null | while IFS= read -r _l; do
+            log "    $_l"
+        done
+    fi
+
+    if pw-cli ls Node 2>/dev/null | grep -q bluez; then
+        log "bluetooth: bluez node'lari mevcut"
+    else
+        log "bluetooth: bluez node'u YOK (cihaz bagli degil ya da henuz belirmemis)"
+    fi
+
+    log "=== hazir ==="
+    return 0
+}
+
+stop() {
+    log "durduruluyor"
+    kill_daemons
+    rm -f "$PW_SOCK" "$PULSE_SOCK" 2>/dev/null
+    log "durdu"
+}
+
+status() {
+    printf 'XDG_RUNTIME_DIR : %s\n' "$XDG_RUNTIME_DIR"
+    printf 'pipewire soketi : %s\n' "$([ -S "$PW_SOCK" ] && echo VAR || echo YOK)"
+    printf 'pulse soketi    : %s\n' "$([ -S "$PULSE_SOCK" ] && echo VAR || echo YOK)"
+    printf 'pw-cli info     : %s\n' "$(pw_alive && echo CEVAP_VERIYOR || echo CEVAP_YOK)"
+    printf 'pactl info      : %s\n' "$(pulse_alive && echo CEVAP_VERIYOR || echo CEVAP_YOK)"
+    printf 'kural           : %s\n' \
+        "$(pa_running && echo 'IHLAL - iki ses sunucusu var!' || echo 'TAMAM - tek ses sunucusu')"
+    if pulse_alive; then
+        if pulse_is_pipewire; then _ps='pipewire-pulse'
+        else _ps='GERCEK PULSEAUDIO (bluez profilleri PA de)'; fi
+    else
+        _ps='yok'
+    fi
+    printf 'pulse sunucusu  : %s\n' "$_ps"
+    printf 'autospawn       : %s\n' "$(autospawn_state)"
+    printf 'surecler        :\n'
+    for _p in pipewire wireplumber pipewire-pulse pulseaudio; do
+        pgrep -u "$UID_NOW" -a -x "$_p" 2>/dev/null | sed 's/^/  /'
+    done
+    printf 'bluetooth       : %s\n' \
+        "$(wpctl status 2>/dev/null | grep -q bluez5 && echo VAR || echo YOK)"
+}
+
+case "${1:-start}" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 0.5; start ;;
+    status)  status ;;
+    *)       echo "kullanim: $0 [start|stop|restart|status]" >&2; exit 2 ;;
+esac

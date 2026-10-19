@@ -1,0 +1,115 @@
+#!/bin/sh
+# Bluetooth ses cihazlarını bağlı tutar.
+#
+# Neden gerekiyor:
+#   BlueZ, "bilinen ama kesilmiş" bir cihazı kendisi geri çağırmaz.
+#   ReconnectIntervals yalnızca link KOPMASı için geçerlidir, temiz
+#   disconnect'i kapsamaz. Açılışta da güvenilir cihaz için ek bir
+#   bağlantı isteği yapılmaz. Bu cihazda (DW-CT14+) ölçüldü:
+#     - cihazı elle açınca bağlanıyor (keşif yanıtı tetikliyor)
+#     - açılışta bağlanmıyor
+#     - disconnect sonrası 90 sn bekleniyor, bağlanmıyor
+#
+# Çalışma biçimi: 15 sn'de bir sessizce durumu denetler, sadece
+# "eşleşmiş + güvenilir + engelli değil + ses profili var + bağlı
+# değil" durumundaysa bağlanmayı dener. Durum değişmeden log'a yazmaz.
+#
+# Kullanım: ~/.local/bin/bt-watch [start|stop|status|once]
+#   once  = tek deneme (elle test için)
+
+LOG=/tmp/bt-watch.log
+STATE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bt-watch.state"
+PIDFILE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bt-watch.pid"
+INTERVAL=15
+
+log() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$LOG" 2>/dev/null; }
+
+# Şu an çalışıyor mu?
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+# Durumu değiştiyse logla (her 15 sn'de log şişmesin diye)
+log_change() {
+    _new=$1
+    _old=$(cat "$STATE" 2>/dev/null)
+    [ "$_old" = "$_new" ] || { echo "$_new" >"$STATE"; log "$_new"; }
+}
+
+# Bağlantı denemesi
+sweep() {
+    _found=0
+    bluetoothctl devices Paired 2>/dev/null | awk '{print $2}' |
+    grep -Ei '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' |
+    while read -r mac; do
+        info=$(bluetoothctl info "$mac" 2>/dev/null) || continue
+
+        # sadece ses cihazları
+        echo "$info" | grep -q 'Audio Sink' || continue
+        # güvenilir ve engelli değil olmalı
+        echo "$info" | grep -q 'Trusted: yes' || continue
+        echo "$info" | grep -q 'Blocked: yes' && continue
+
+        if echo "$info" | grep -q 'Connected: yes'; then
+            name=$(echo "$info" | sed -n 's/^	Name: //p')
+            log_change "$mac ($name) bagli"
+        else
+            name=$(echo "$info" | sed -n 's/^	Name: //p')
+            log_change "$mac ($name) baglaniyor..."
+            if bluetoothctl connect "$mac" >/dev/null 2>&1; then
+                log "$mac ($name) baglandi"
+            else
+                # menzil disi / kapali - sonraki turda tekrar dene
+                log "$mac ($name) baglanamadi (menzil disi veya kapali)"
+            fi
+        fi
+    done
+}
+
+case "${1:-start}" in
+    once)
+        sweep
+        exit 0
+        ;;
+    stop)
+        if running; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null
+            log "durduruldu"
+        fi
+        rm -f "$PIDFILE"
+        exit 0
+        ;;
+    status)
+        if running; then
+            echo "calisiyor (pid $(cat "$PIDFILE"))"
+        else
+            echo "calismiyor"
+        fi
+        echo "son durum: $(cat "$STATE" 2>/dev/null || echo '-')"
+        echo "son log:"
+        tail -n 5 "$LOG" 2>/dev/null | sed 's/^/  /'
+        exit 0
+        ;;
+    start) ;;
+    *) echo "kullanim: $0 [start|stop|status|once]" >&2; exit 2 ;;
+esac
+
+# Çift örnek olmasın
+if running; then
+    log "zaten calisiyor (pid $(cat "$PIDFILE"))"
+    exit 0
+fi
+
+# bluetoothd hazır olana kadar bekle
+_i=0
+while [ "$_i" -lt 60 ]; do
+    bluetoothctl show >/dev/null 2>&1 && break
+    sleep 1
+    _i=$((_i + 1))
+done
+
+echo $$ >"$PIDFILE"
+log "izleyici basladi (pid $$), aralik ${INTERVAL}s"
+
+while :; do
+    sweep
+    sleep "$INTERVAL"
+done
